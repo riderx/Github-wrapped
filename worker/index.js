@@ -521,6 +521,7 @@ async function handleRequest(request, env, ctx) {
   // Parse path
   const path = url.pathname;
   
+  // API routes
   if (path === '/api/wrapped') {
     // Get query parameters
     const username = url.searchParams.get('username');
@@ -647,7 +648,13 @@ async function handleRequest(request, env, ctx) {
     return response;
   }
   
-  return new Response('Not Found', { status: 404, headers: corsHeaders });
+  // Serve static assets from ASSETS binding (Cloudflare Workers Sites)
+  try {
+    return await env.ASSETS.fetch(request);
+  } catch (e) {
+    return new Response('Not Found', { status: 404, headers: corsHeaders });
+  }
+}
 }
 
 export default {

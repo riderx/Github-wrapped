@@ -79,16 +79,22 @@ To view private repository data, you'll need a GitHub Personal Access Token:
 
 ### Automated Deployment with GitHub Actions
 
-This project includes automated deployment via GitHub Actions. Every push to the `main` branch automatically deploys:
-- **Frontend** to Cloudflare Pages
-- **Worker** to Cloudflare Workers
+This project includes automated deployment via GitHub Actions. Every push to the `main` branch automatically deploys everything as a **single Cloudflare Worker** that serves both the frontend and API.
+
+#### How It Works
+
+The Cloudflare Worker:
+- Serves the Vue.js frontend (HTML, CSS, JS) from the `/dist` directory
+- Handles API requests at `/api/wrapped`
+- Uses Cloudflare Workers Sites to serve static assets
+- Includes caching for optimal performance
 
 #### Setup GitHub Actions Deployment
 
 1. **Get your Cloudflare credentials:**
    - Go to [Cloudflare Dashboard](https://dash.cloudflare.com/)
    - Navigate to "My Profile" → "API Tokens"
-   - Create a token with "Edit Cloudflare Workers" and "Edit Cloudflare Pages" permissions
+   - Create a token with "Edit Cloudflare Workers" permissions
    - Note your Account ID (found in Workers & Pages overview)
 
 2. **Add secrets to your GitHub repository:**
@@ -99,12 +105,13 @@ This project includes automated deployment via GitHub Actions. Every push to the
 
 3. **Deploy:**
    - Push to `main` branch or manually trigger the workflow
-   - The workflow will automatically build and deploy both frontend and worker
+   - The workflow will automatically:
+     1. Build the frontend (`npm run build`)
+     2. Deploy the worker with static assets
    - Check the Actions tab in GitHub for deployment status
+   - Your app will be available at `https://github-wrapped.<your-subdomain>.workers.dev`
 
 ### Manual Deployment
-
-#### Deploy Worker to Cloudflare Workers
 
 1. Install Wrangler CLI:
 ```bash
@@ -116,27 +123,13 @@ npm install -g wrangler
 wrangler login
 ```
 
-3. Deploy the worker:
-```bash
-npm run worker:deploy
-```
-
-4. Update the API endpoint in your frontend to use the deployed worker URL
-
-#### Deploy Frontend
-
-The frontend can be deployed to any static hosting service:
-- **Cloudflare Pages**: Connect your GitHub repo and deploy automatically
-- **Vercel**: Import your GitHub repo and deploy
-- **Netlify**: Connect your GitHub repo and deploy
-- **GitHub Pages**: Use GitHub Actions to build and deploy
-
-Build the frontend:
+3. Build and deploy:
 ```bash
 npm run build
+wrangler deploy
 ```
 
-The built files will be in the `dist/` directory.
+The worker will automatically include the built frontend from the `dist/` folder and serve it alongside the API.
 
 ## Project Structure
 
