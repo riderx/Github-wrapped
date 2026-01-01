@@ -5,131 +5,140 @@
       {{ toastMessage }}
     </div>
 
-    <!-- User Header -->
-    <div class="user-header fade-in">
-      <img :src="data.user.avatar" :alt="data.user.login" class="avatar" />
-      <h2 class="user-name">{{ data.user.name || data.user.login }}</h2>
-      <p class="user-login">@{{ data.user.login }}</p>
-      <p v-if="data.user.bio" class="user-bio">{{ data.user.bio }}</p>
-      <div class="user-stats">
-        <div class="stat">
-          <span class="stat-value">{{ data.user.followers }}</span>
-          <span class="stat-label">Followers</span>
-        </div>
-        <div class="stat">
-          <span class="stat-value">{{ data.user.following }}</span>
-          <span class="stat-label">Following</span>
-        </div>
-        <div class="stat">
-          <span class="stat-value">{{ data.user.publicRepos }}</span>
-          <span class="stat-label">Repos</span>
-        </div>
+    <!-- Hero Section -->
+    <section class="hero-section fade-in">
+      <div class="hero-content">
+        <img :src="data.user.avatar" :alt="data.user.login" class="hero-avatar" />
+        <h1 class="hero-year">{{ data.year }}</h1>
+        <p class="hero-subtitle">@{{ data.user.login }}'s year in code</p>
       </div>
-    </div>
+    </section>
 
-    <!-- Year Banner -->
-    <div class="year-banner fade-in">
-      <h1 class="year-title">{{ data.year }} GitHub Wrapped</h1>
-    </div>
+    <!-- Story Card -->
+    <section v-if="data.insights && data.insights.story" class="story-card fade-in">
+      <div class="card-content">
+        <h2 class="card-title">Your Story</h2>
+        <p class="story-text">{{ data.insights.story }}</p>
+      </div>
+    </section>
+
+    <!-- Main Theme -->
+    <section v-if="data.insights && data.insights.mainTheme" class="theme-card fade-in">
+      <div class="card-content">
+        <div class="theme-icon">🎯</div>
+        <h2 class="theme-title">{{ data.insights.mainTheme }}</h2>
+      </div>
+    </section>
 
     <!-- Stats Grid -->
-    <div class="stats-grid">
-      <div class="stat-card fade-in" style="animation-delay: 0.1s">
-        <div class="stat-icon">📝</div>
-        <div class="stat-number">{{ formatNumber(data.stats.totalCommits) }}</div>
-        <div class="stat-title">Total Commits</div>
-        <div class="stat-desc">Lines of code written</div>
+    <section class="stats-section fade-in">
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-number">{{ formatNumber(data.stats.totalCommits) }}</div>
+          <div class="stat-label">Commits</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-number">{{ data.stats.repositoriesContributed }}</div>
+          <div class="stat-label">Repositories</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-number">{{ formatNumber(data.stats.pullRequests) }}</div>
+          <div class="stat-label">Pull Requests</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-number">{{ formatNumber(data.stats.issues) }}</div>
+          <div class="stat-label">Issues</div>
+        </div>
       </div>
+    </section>
 
-      <div class="stat-card fade-in" style="animation-delay: 0.2s">
-        <div class="stat-icon">🎯</div>
-        <div class="stat-number">{{ formatNumber(data.stats.pullRequests) }}</div>
-        <div class="stat-title">Pull Requests</div>
-        <div class="stat-desc">Code contributions</div>
+    <!-- AI Insights - Struggles -->
+    <section v-if="data.insights && data.insights.biggestStruggles && data.insights.biggestStruggles.length > 0" class="insight-card struggles-card fade-in">
+      <div class="card-content">
+        <h2 class="insight-title">
+          <span class="insight-icon">💪</span>
+          Challenges Conquered
+        </h2>
+        <ul class="insight-list">
+          <li v-for="(struggle, index) in data.insights.biggestStruggles" :key="index" class="insight-item">
+            {{ struggle }}
+          </li>
+        </ul>
       </div>
+    </section>
 
-      <div class="stat-card fade-in" style="animation-delay: 0.3s">
-        <div class="stat-icon">🐛</div>
-        <div class="stat-number">{{ formatNumber(data.stats.issues) }}</div>
-        <div class="stat-title">Issues</div>
-        <div class="stat-desc">Problems solved</div>
+    <!-- AI Insights - Proud Moments -->
+    <section v-if="data.insights && data.insights.proudMoments && data.insights.proudMoments.length > 0" class="insight-card proud-card fade-in">
+      <div class="card-content">
+        <h2 class="insight-title">
+          <span class="insight-icon">🎉</span>
+          Proud Moments
+        </h2>
+        <ul class="insight-list">
+          <li v-for="(moment, index) in data.insights.proudMoments" :key="index" class="insight-item">
+            {{ moment }}
+          </li>
+        </ul>
       </div>
-
-      <div class="stat-card fade-in" style="animation-delay: 0.4s">
-        <div class="stat-icon">👀</div>
-        <div class="stat-number">{{ formatNumber(data.stats.reviews) }}</div>
-        <div class="stat-title">Code Reviews</div>
-        <div class="stat-desc">Feedback given</div>
-      </div>
-    </div>
+    </section>
 
     <!-- Top Languages -->
-    <div v-if="data.stats.topLanguages.length > 0" class="section fade-in">
-      <h3 class="section-title">🔥 Top Languages</h3>
-      <div class="languages">
-        <div
-          v-for="(lang, index) in data.stats.topLanguages"
-          :key="lang.language"
-          class="language-item fade-in"
-          :style="{ animationDelay: `${0.5 + index * 0.1}s` }"
-        >
-          <div class="language-info">
+    <section v-if="data.stats.topLanguages.length > 0" class="languages-section fade-in">
+      <div class="card-content">
+        <h2 class="section-title">Top Languages</h2>
+        <div class="languages-list">
+          <div v-for="(lang, index) in data.stats.topLanguages.slice(0, 3)" :key="lang.language" class="language-item">
+            <span class="language-rank">{{ index + 1 }}</span>
             <span class="language-name">{{ lang.language }}</span>
-            <span class="language-commits">{{ formatNumber(lang.commits) }} commits</span>
-          </div>
-          <div class="language-bar">
-            <div
-              class="language-bar-fill"
-              :style="{ width: `${getLanguagePercent(lang.commits)}%` }"
-            ></div>
+            <span class="language-count">{{ formatNumber(lang.commits) }}</span>
           </div>
         </div>
       </div>
-    </div>
+    </section>
 
-    <!-- Top Repositories -->
-    <div v-if="data.stats.topRepositories.length > 0" class="section fade-in">
-      <h3 class="section-title">⭐ Most Active Repositories</h3>
-      <div class="repos">
-        <div
-          v-for="(repo, index) in data.stats.topRepositories"
-          :key="repo.fullName"
-          class="repo-item fade-in"
-          :style="{ animationDelay: `${0.7 + index * 0.1}s` }"
-        >
-          <div class="repo-header">
-            <span class="repo-name">{{ repo.fullName }}</span>
-            <span class="repo-stars">⭐ {{ formatNumber(repo.stars) }}</span>
-          </div>
-          <div class="repo-stats">
-            <span class="repo-commits">{{ formatNumber(repo.commits) }} commits</span>
-            <span v-if="repo.language" class="repo-language">
-              <span class="language-dot" :style="{ background: getLanguageColor(repo.language) }"></span>
-              {{ repo.language }}
-            </span>
-          </div>
+    <!-- Work Style -->
+    <section v-if="data.insights && data.insights.workStyle" class="workstyle-card fade-in">
+      <div class="card-content">
+        <h2 class="card-title">Your Style</h2>
+        <p class="workstyle-text">{{ data.insights.workStyle.description || `You're a ${data.insights.workStyle.approach} developer with a ${data.insights.workStyle.pace} pace.` }}</p>
+      </div>
+    </section>
+
+    <!-- Topics Explored -->
+    <section v-if="data.insights && data.insights.topicsExplored && data.insights.topicsExplored.length > 0" class="topics-card fade-in">
+      <div class="card-content">
+        <h2 class="card-title">Topics You Explored</h2>
+        <div class="topics-grid">
+          <span v-for="(topic, index) in data.insights.topicsExplored" :key="index" class="topic-tag">
+            {{ topic }}
+          </span>
         </div>
       </div>
-    </div>
+    </section>
 
-    <!-- Summary -->
-    <div class="summary fade-in">
-      <h3 class="summary-title">🎉 {{ data.year }} was an amazing year!</h3>
-      <p class="summary-text">
-        You contributed to <strong>{{ data.stats.repositoriesContributed }}</strong> 
-        {{ data.stats.repositoriesContributed === 1 ? 'repository' : 'repositories' }}
-        with <strong>{{ formatNumber(data.stats.totalCommits) }}</strong> commits.
-        Keep up the great work in {{ data.year + 1 }}!
-      </p>
-    </div>
+    <!-- Fun Fact -->
+    <section v-if="data.insights && data.insights.funFact" class="funfact-card fade-in">
+      <div class="card-content">
+        <div class="funfact-icon">✨</div>
+        <p class="funfact-text">{{ data.insights.funFact }}</p>
+      </div>
+    </section>
+
+    <!-- Closing Card -->
+    <section class="closing-card fade-in">
+      <div class="card-content">
+        <h2 class="closing-title">{{ data.year }} was your year.</h2>
+        <p class="closing-text">Keep building. Keep growing.</p>
+      </div>
+    </section>
 
     <!-- Actions -->
     <div class="actions">
       <button @click="$emit('reset')" class="action-btn secondary">
-        Generate Another
+        Start Over
       </button>
       <button @click="shareWrapped" class="action-btn primary">
-        Share Results
+        Share
       </button>
     </div>
   </div>
@@ -155,35 +164,6 @@ export default {
       return num.toLocaleString()
     }
 
-    const getLanguagePercent = (commits) => {
-      const maxCommits = Math.max(...props.data.stats.topLanguages.map(l => l.commits))
-      return (commits / maxCommits) * 100
-    }
-
-    const getLanguageColor = (language) => {
-      const colors = {
-        JavaScript: '#f1e05a',
-        TypeScript: '#3178c6',
-        Python: '#3572A5',
-        Java: '#b07219',
-        Go: '#00ADD8',
-        Rust: '#dea584',
-        Ruby: '#701516',
-        PHP: '#4F5D95',
-        C: '#555555',
-        'C++': '#f34b7d',
-        'C#': '#178600',
-        Swift: '#F05138',
-        Kotlin: '#A97BFF',
-        Dart: '#00B4AB',
-        HTML: '#e34c26',
-        CSS: '#563d7c',
-        Vue: '#41b883',
-        Shell: '#89e051',
-      }
-      return colors[language] || '#8b949e'
-    }
-
     const showNotification = (message) => {
       toastMessage.value = message
       showToast.value = true
@@ -193,7 +173,7 @@ export default {
     }
 
     const shareWrapped = () => {
-      const text = `My ${props.data.year} GitHub Wrapped: ${props.data.stats.totalCommits} commits, ${props.data.stats.repositoriesContributed} repos! 🎉`
+      const text = `My ${props.data.year} GitHub Wrapped: ${props.data.stats.totalCommits} commits across ${props.data.stats.repositoriesContributed} repos!`
       const url = window.location.href
       
       if (navigator.share) {
@@ -202,7 +182,6 @@ export default {
           text: text,
           url: url
         }).catch(() => {
-          // Fallback to copying text
           copyToClipboard(text)
         })
       } else {
@@ -212,9 +191,9 @@ export default {
 
     const copyToClipboard = (text) => {
       navigator.clipboard.writeText(text).then(() => {
-        showNotification('✓ Copied to clipboard!')
+        showNotification('✓ Copied!')
       }).catch(() => {
-        showNotification('Unable to copy to clipboard')
+        showNotification('Unable to copy')
       })
     }
 
@@ -222,8 +201,6 @@ export default {
       showToast,
       toastMessage,
       formatNumber,
-      getLanguagePercent,
-      getLanguageColor,
       shareWrapped
     }
   }
@@ -232,334 +209,375 @@ export default {
 
 <style scoped>
 .wrapped {
-  max-width: 900px;
+  max-width: 800px;
   margin: 0 auto;
-  position: relative;
+  padding: var(--space-xl) 0;
 }
 
 .toast {
   position: fixed;
-  top: 2rem;
-  right: 2rem;
-  background: var(--success);
-  color: white;
-  padding: 1rem 1.5rem;
-  border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  top: var(--space-lg);
+  right: var(--space-lg);
+  background: var(--accent-primary);
+  color: var(--bg-primary);
+  padding: var(--space-md) var(--space-lg);
+  border-radius: 24px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
   z-index: 1000;
-  font-weight: 500;
+  font-weight: 600;
+  font-size: var(--font-caption);
 }
 
-.user-header {
+/* Hero Section */
+.hero-section {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   text-align: center;
-  padding: 2rem;
-  background: var(--bg-secondary);
-  border-radius: 12px;
-  border: 1px solid var(--border);
-  margin-bottom: 2rem;
+  margin-bottom: var(--space-xl);
 }
 
-.avatar {
+.hero-content {
+  animation-delay: 0.2s;
+}
+
+.hero-avatar {
   width: 120px;
   height: 120px;
   border-radius: 50%;
-  border: 4px solid var(--accent);
-  margin-bottom: 1rem;
+  border: 4px solid var(--accent-primary);
+  margin-bottom: var(--space-lg);
 }
 
-.user-name {
-  font-size: 2rem;
+.hero-year {
+  font-size: 6rem;
   font-weight: 700;
-  margin-bottom: 0.5rem;
+  line-height: 1;
+  margin-bottom: var(--space-md);
+  color: var(--text-primary);
+  letter-spacing: -0.03em;
 }
 
-.user-login {
+.hero-subtitle {
+  font-size: var(--font-subheading);
   color: var(--text-secondary);
-  font-size: 1.25rem;
-  margin-bottom: 1rem;
 }
 
-.user-bio {
-  color: var(--text-secondary);
-  max-width: 600px;
-  margin: 0 auto 1.5rem;
-}
-
-.user-stats {
+/* Story Card */
+.story-card {
+  min-height: 60vh;
   display: flex;
-  justify-content: center;
-  gap: 2rem;
-  margin-top: 1.5rem;
-}
-
-.stat {
-  display: flex;
-  flex-direction: column;
   align-items: center;
+  justify-content: center;
+  padding: var(--space-xl);
+  margin-bottom: var(--space-xl);
 }
 
-.stat-value {
-  font-size: 1.5rem;
-  font-weight: 700;
-  color: var(--accent);
-}
-
-.stat-label {
-  font-size: 0.875rem;
-  color: var(--text-secondary);
-}
-
-.year-banner {
+.story-text {
+  font-size: var(--font-heading);
+  line-height: 1.6;
+  color: var(--text-primary);
   text-align: center;
-  padding: 3rem 0;
+  max-width: 700px;
 }
 
-.year-title {
-  font-size: 3.5rem;
-  font-weight: 800;
-  background: linear-gradient(135deg, var(--accent) 0%, var(--success) 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+/* Theme Card */
+.theme-card {
+  min-height: 60vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-xl);
+  margin-bottom: var(--space-xl);
+  text-align: center;
+}
+
+.theme-icon {
+  font-size: 4rem;
+  margin-bottom: var(--space-lg);
+}
+
+.theme-title {
+  font-size: var(--font-title);
+  line-height: 1.3;
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
+/* Stats Grid */
+.stats-section {
+  margin-bottom: var(--space-xl);
+  padding: var(--space-xl) 0;
 }
 
 .stats-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 1.5rem;
-  margin-bottom: 3rem;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--space-lg);
 }
 
 .stat-card {
   background: var(--bg-secondary);
-  padding: 2rem;
+  padding: var(--space-xl);
   border-radius: 12px;
-  border: 1px solid var(--border);
   text-align: center;
-  transition: transform 0.2s, border-color 0.2s;
-}
-
-.stat-card:hover {
-  transform: translateY(-4px);
-  border-color: var(--accent);
-}
-
-.stat-icon {
-  font-size: 2.5rem;
-  margin-bottom: 1rem;
 }
 
 .stat-number {
-  font-size: 2.5rem;
+  font-size: var(--font-hero);
   font-weight: 700;
-  color: var(--accent);
-  margin-bottom: 0.5rem;
+  color: var(--accent-primary);
+  line-height: 1;
+  margin-bottom: var(--space-sm);
 }
 
-.stat-title {
-  font-size: 1.1rem;
-  font-weight: 600;
-  margin-bottom: 0.25rem;
-}
-
-.stat-desc {
-  font-size: 0.875rem;
+.stat-label {
+  font-size: var(--font-caption);
   color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
 }
 
-.section {
-  margin-bottom: 3rem;
+/* Insight Cards */
+.insight-card {
+  margin-bottom: var(--space-xl);
+  padding: var(--space-xl);
+}
+
+.card-content {
+  max-width: 700px;
+  margin: 0 auto;
+}
+
+.card-title {
+  font-size: var(--font-heading);
+  font-weight: 700;
+  margin-bottom: var(--space-lg);
+  color: var(--text-primary);
+}
+
+.insight-title {
+  font-size: var(--font-subheading);
+  font-weight: 700;
+  margin-bottom: var(--space-lg);
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+}
+
+.insight-icon {
+  font-size: 2rem;
+}
+
+.insight-list {
+  list-style: none;
+  padding: 0;
+}
+
+.insight-item {
+  padding: var(--space-md) 0;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--font-body-lg);
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.insight-item:last-child {
+  border-bottom: none;
+}
+
+/* Languages */
+.languages-section {
+  margin-bottom: var(--space-xl);
+  padding: var(--space-xl);
 }
 
 .section-title {
-  font-size: 1.75rem;
+  font-size: var(--font-heading);
   font-weight: 700;
-  margin-bottom: 1.5rem;
+  margin-bottom: var(--space-lg);
+  color: var(--text-primary);
 }
 
-.languages {
-  background: var(--bg-secondary);
-  padding: 2rem;
-  border-radius: 12px;
-  border: 1px solid var(--border);
+.languages-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
 }
 
 .language-item {
-  margin-bottom: 1.5rem;
+  display: grid;
+  grid-template-columns: 3rem 1fr auto;
+  align-items: center;
+  gap: var(--space-lg);
+  padding: var(--space-md) 0;
 }
 
-.language-item:last-child {
-  margin-bottom: 0;
-}
-
-.language-info {
-  display: flex;
-  justify-content: space-between;
-  margin-bottom: 0.5rem;
+.language-rank {
+  font-size: var(--font-title);
+  font-weight: 700;
+  color: var(--text-secondary);
+  text-align: center;
 }
 
 .language-name {
+  font-size: var(--font-subheading);
   font-weight: 600;
+  color: var(--text-primary);
 }
 
-.language-commits {
+.language-count {
+  font-size: var(--font-body);
   color: var(--text-secondary);
-  font-size: 0.875rem;
 }
 
-.language-bar {
-  height: 8px;
-  background: var(--bg-tertiary);
-  border-radius: 4px;
-  overflow: hidden;
-}
-
-.language-bar-fill {
-  height: 100%;
-  background: linear-gradient(90deg, var(--accent), var(--success));
-  border-radius: 4px;
-  transition: width 1s ease-out;
-}
-
-.repos {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-
-.repo-item {
-  background: var(--bg-secondary);
-  padding: 1.5rem;
-  border-radius: 12px;
-  border: 1px solid var(--border);
-  transition: transform 0.2s, border-color 0.2s;
-}
-
-.repo-item:hover {
-  transform: translateX(8px);
-  border-color: var(--accent);
-}
-
-.repo-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 0.75rem;
-}
-
-.repo-name {
-  font-weight: 600;
-  font-size: 1.1rem;
-}
-
-.repo-stars {
-  color: var(--text-secondary);
-  font-size: 0.875rem;
-}
-
-.repo-stats {
-  display: flex;
-  gap: 1.5rem;
-  color: var(--text-secondary);
-  font-size: 0.875rem;
-}
-
-.repo-commits {
-  font-weight: 500;
-}
-
-.repo-language {
+/* Work Style */
+.workstyle-card {
+  min-height: 50vh;
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  justify-content: center;
+  padding: var(--space-xl);
+  margin-bottom: var(--space-xl);
 }
 
-.language-dot {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-}
-
-.summary {
+.workstyle-text {
+  font-size: var(--font-subheading);
+  line-height: 1.6;
+  color: var(--text-secondary);
   text-align: center;
-  padding: 3rem 2rem;
-  background: linear-gradient(135deg, rgba(88, 166, 255, 0.1), rgba(63, 185, 80, 0.1));
-  border-radius: 12px;
-  margin-bottom: 2rem;
+  max-width: 600px;
 }
 
-.summary-title {
-  font-size: 2rem;
-  font-weight: 700;
-  margin-bottom: 1rem;
+/* Topics */
+.topics-card {
+  margin-bottom: var(--space-xl);
+  padding: var(--space-xl);
 }
 
-.summary-text {
-  font-size: 1.1rem;
-  line-height: 1.8;
+.topics-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-md);
+}
+
+.topic-tag {
+  padding: var(--space-sm) var(--space-lg);
+  background: var(--bg-secondary);
+  border-radius: 24px;
+  font-size: var(--font-body);
   color: var(--text-secondary);
 }
 
-.summary-text strong {
-  color: var(--accent);
-  font-weight: 600;
+/* Fun Fact */
+.funfact-card {
+  min-height: 50vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-xl);
+  margin-bottom: var(--space-xl);
+  text-align: center;
 }
 
+.funfact-icon {
+  font-size: 3rem;
+  margin-bottom: var(--space-lg);
+}
+
+.funfact-text {
+  font-size: var(--font-subheading);
+  line-height: 1.6;
+  color: var(--text-primary);
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+/* Closing Card */
+.closing-card {
+  min-height: 80vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  margin-bottom: var(--space-xl);
+}
+
+.closing-title {
+  font-size: var(--font-hero);
+  font-weight: 700;
+  margin-bottom: var(--space-lg);
+  color: var(--text-primary);
+  letter-spacing: -0.02em;
+}
+
+.closing-text {
+  font-size: var(--font-subheading);
+  color: var(--text-secondary);
+}
+
+/* Actions */
 .actions {
   display: flex;
-  gap: 1rem;
+  gap: var(--space-md);
   justify-content: center;
-  margin-bottom: 3rem;
+  margin: var(--space-xl) 0;
 }
 
 .action-btn {
-  padding: 1rem 2rem;
-  border-radius: 8px;
-  font-weight: 600;
-  font-size: 1rem;
-  transition: all 0.2s;
+  padding: var(--space-md) var(--space-xl);
+  border-radius: 24px;
+  font-weight: 700;
+  font-size: var(--font-body);
+  transition: all 0.2s ease;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
 .action-btn.primary {
-  background: var(--accent);
-  color: white;
+  background: var(--accent-primary);
+  color: var(--bg-primary);
 }
 
 .action-btn.primary:hover {
-  background: var(--accent-hover);
   transform: scale(1.05);
+  box-shadow: 0 8px 24px rgba(29, 185, 84, 0.3);
 }
 
 .action-btn.secondary {
-  background: var(--bg-secondary);
-  color: var(--text-primary);
+  background: transparent;
+  color: var(--text-secondary);
   border: 1px solid var(--border);
 }
 
 .action-btn.secondary:hover {
-  border-color: var(--accent);
-  transform: scale(1.05);
+  color: var(--text-primary);
+  border-color: var(--text-primary);
 }
 
 @media (max-width: 768px) {
-  .year-title {
-    font-size: 2.5rem;
+  .hero-year {
+    font-size: 4rem;
   }
 
   .stats-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
-
-  .stat-card {
-    padding: 1.5rem;
+    grid-template-columns: 1fr;
+    gap: var(--space-md);
   }
 
   .stat-number {
-    font-size: 2rem;
+    font-size: var(--font-title);
   }
 
-  .user-stats {
-    gap: 1rem;
+  .story-text,
+  .theme-title {
+    font-size: var(--font-subheading);
+  }
+
+  .closing-title {
+    font-size: var(--font-title);
   }
 
   .actions {

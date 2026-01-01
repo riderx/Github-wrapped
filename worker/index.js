@@ -79,19 +79,26 @@ async function getUserRepos(username, token) {
 }
 
 /**
- * Get commits for a repository in a specific year
+ * Get commits for a repository in a specific year with messages
  */
 async function getRepoCommits(owner, repo, username, year, token) {
   const since = `${year}-01-01T00:00:00Z`;
   const until = `${year}-12-31T23:59:59Z`;
   
   try {
-    // Only check first page to reduce API calls
+    // Fetch commits with details
     const commits = await fetchGitHub(
-      `https://api.github.com/repos/${owner}/${repo}/commits?author=${username}&since=${since}&until=${until}&per_page=30`,
+      `https://api.github.com/repos/${owner}/${repo}/commits?author=${username}&since=${since}&until=${until}&per_page=100`,
       token
     );
-    return commits;
+    
+    // Return commits with message and date
+    return commits.map(commit => ({
+      sha: commit.sha,
+      message: commit.commit.message,
+      date: commit.commit.author.date,
+      repo: `${owner}/${repo}`
+    }));
   } catch (error) {
     console.error(`Error fetching commits for ${owner}/${repo}:`, error);
     return [];
@@ -112,6 +119,247 @@ async function getUserEvents(username, token) {
     console.error(`Error fetching events for ${username}:`, error);
     return [];
   }
+}
+
+/**
+ * Analyze commit messages using AI to extract meaningful insights
+ */
+async function analyzeCommitsWithAI(allCommits, env) {
+  if (!allCommits || allCommits.length === 0) {
+    return null;
+  }
+  
+  // Prepare commit data for AI analysis
+  const commitSample = allCommits.slice(0, 200); // Analyze up to 200 commits
+  const commitText = commitSample.map((c, i) => 
+    `${i + 1}. [${c.repo}] ${c.message.split('\n')[0]}`
+  ).join('\n');
+  
+  const prompt = `Analyze these GitHub commits from a developer's year and provide deep, insightful observations:
+
+${commitText}
+
+Based on these commits, provide a detailed analysis in JSON format with these sections:
+
+1. "story": A 2-3 sentence narrative about this developer's year - what was their journey?
+2. "mainTheme": One sentence describing the overarching theme of their work
+3. "biggestStruggles": Array of 2-3 specific challenges they faced (with evidence from commit messages)
+4. "proudMoments": Array of 2-3 achievements or breakthroughs (with evidence)
+5. "workStyle": Object describing their development style:
+   - "pace": "steady", "burst", or "sprint"
+   - "approach": "perfectionist", "pragmatic", "experimental", etc.
+   - "description": 1 sentence description
+6. "topicsExplored": Array of 3-5 technical topics/technologies they worked on
+7. "evolutionInsight": How did their work evolve through the year?
+8. "funFact": One interesting, specific observation about their commit patterns
+
+Return only valid JSON, no other text.`;
+
+  try {
+    // Use Cloudflare Workers AI for analysis
+    const response = await env.AI.run('@cf/meta/llama-3-8b-instruct', {
+      messages: [
+        { role: 'system', content: 'You are an expert at analyzing developer activity and providing meaningful insights. Always respond with valid JSON only.' },
+        { role: 'user', content: prompt }
+      ],
+      max_tokens: 1500
+    });
+    
+    // Parse AI response
+    let aiInsights;
+    try {
+      const responseText = response.response || JSON.stringify(response);
+      // Try to extract JSON from response
+      const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        aiInsights = JSON.parse(jsonMatch[0]);
+      } else {
+        aiInsights = JSON.parse(responseText);
+      }
+    } catch (e) {
+      console.error('Failed to parse AI response:', e);
+      return null;
+    }
+    
+    return aiInsights;
+  } catch (error) {
+    console.error('AI analysis failed:', error);
+    return null;
+  }
+}
+
+/**
+ * Analyze commit messages to extract insights (fallback method)
+ */
+function analyzeCommitMessages(allCommits) {
+  const insights = {
+    themes: [],
+    struggles: [],
+    quickWins: [],
+    majorFeatures: [],
+    commitPatterns: {},
+    workingStyle: {}
+  };
+  
+  // Keywords for different categories
+  const struggleKeywords = ['fix', 'bug', 'issue', 'error', 'problem', 'broken', 'failing', 'debug', 'revert', 'hotfix', 'patch', 'workaround'];
+  const featureKeywords = ['add', 'implement', 'create', 'new', 'feature', 'support', 'enable'];
+  const refactorKeywords = ['refactor', 'cleanup', 'improve', 'optimize', 'reorganize', 'simplify', 'restructure'];
+  const docsKeywords = ['doc', 'readme', 'comment', 'documentation'];
+  const testKeywords = ['test', 'spec', 'coverage'];
+  
+  // Analyze each commit
+  const commitsByType = {
+    fixes: [],
+    features: [],
+    refactors: [],
+    docs: [],
+    tests: [],
+    other: []
+  };
+  
+  const commitsByLength = {
+    quick: [],  // Small commits
+    substantial: []  // Larger, detailed commits
+  };
+  
+  allCommits.forEach(commit => {
+    const msg = commit.message.toLowerCase();
+    const lines = commit.message.split('\n');
+    const firstLine = lines[0];
+    
+    // Categorize by type
+    if (struggleKeywords.some(kw => msg.includes(kw))) {
+      commitsByType.fixes.push({ ...commit, firstLine });
+    } else if (featureKeywords.some(kw => msg.includes(kw))) {
+      commitsByType.features.push({ ...commit, firstLine });
+    } else if (refactorKeywords.some(kw => msg.includes(kw))) {
+      commitsByType.refactors.push({ ...commit, firstLine });
+    } else if (docsKeywords.some(kw => msg.includes(kw))) {
+      commitsByType.docs.push({ ...commit, firstLine });
+    } else if (testKeywords.some(kw => msg.includes(kw))) {
+      commitsByType.tests.push({ ...commit, firstLine });
+    } else {
+      commitsByType.other.push({ ...commit, firstLine });
+    }
+    
+    // Categorize by commit message detail
+    if (lines.length > 2 || commit.message.length > 100) {
+      commitsByLength.substantial.push({ ...commit, firstLine });
+    } else {
+      commitsByLength.quick.push({ ...commit, firstLine });
+    }
+  });
+  
+  // Generate insights
+  const totalCommits = allCommits.length;
+  
+  // Themes - what dominated the year
+  const themes = [];
+  if (commitsByType.features.length / totalCommits > 0.3) {
+    themes.push({
+      title: 'The Builder',
+      description: `You were in creation mode! ${commitsByType.features.length} commits focused on building new features and capabilities.`,
+      icon: '🏗️'
+    });
+  }
+  
+  if (commitsByType.fixes.length / totalCommits > 0.25) {
+    themes.push({
+      title: 'The Problem Solver',
+      description: `${commitsByType.fixes.length} commits dedicated to fixing issues and debugging. You fought through the tough problems!`,
+      icon: '🔧'
+    });
+  }
+  
+  if (commitsByType.refactors.length / totalCommits > 0.15) {
+    themes.push({
+      title: 'The Perfectionist',
+      description: `${commitsByType.refactors.length} commits improving and refactoring code. Quality matters to you!`,
+      icon: '✨'
+    });
+  }
+  
+  if (commitsByType.tests.length / totalCommits > 0.1) {
+    themes.push({
+      title: 'The Quality Guardian',
+      description: `${commitsByType.tests.length} commits adding tests. You believe in robust, tested code!`,
+      icon: '🛡️'
+    });
+  }
+  
+  // Struggles - commits that show challenges
+  const struggles = commitsByType.fixes
+    .filter(c => {
+      const msg = c.message.toLowerCase();
+      return msg.includes('finally') || msg.includes('fixed') || msg.includes('resolved') || 
+             msg.includes('workaround') || msg.includes('attempt') || msg.includes('try');
+    })
+    .slice(0, 5)
+    .map(c => ({
+      message: c.firstLine,
+      repo: c.repo,
+      date: c.date
+    }));
+  
+  // Quick wins - short, impactful commits
+  const quickWins = commitsByLength.quick
+    .filter(c => commitsByType.features.includes(c))
+    .slice(0, 5)
+    .map(c => ({
+      message: c.firstLine,
+      repo: c.repo,
+      date: c.date
+    }));
+  
+  // Major features - detailed commits about new features
+  const majorFeatures = commitsByLength.substantial
+    .filter(c => commitsByType.features.includes(c))
+    .slice(0, 5)
+    .map(c => ({
+      message: c.firstLine,
+      repo: c.repo,
+      date: c.date,
+      details: c.message.split('\n').slice(1).join('\n').trim()
+    }));
+  
+  // Working style
+  const workingStyle = {
+    commitFrequency: totalCommits > 500 ? 'Very Active' : totalCommits > 200 ? 'Active' : 'Steady',
+    detailLevel: commitsByLength.substantial.length / totalCommits > 0.3 ? 'Detailed' : 'Concise',
+    focusArea: Object.entries(commitsByType)
+      .sort(([, a], [, b]) => b.length - a.length)[0][0]
+  };
+  
+  // Most active months
+  const monthlyCommits = {};
+  allCommits.forEach(commit => {
+    const month = new Date(commit.date).toLocaleString('default', { month: 'long' });
+    monthlyCommits[month] = (monthlyCommits[month] || 0) + 1;
+  });
+  
+  const topMonths = Object.entries(monthlyCommits)
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, 3)
+    .map(([month, count]) => ({ month, commits: count }));
+  
+  return {
+    themes,
+    struggles,
+    quickWins,
+    majorFeatures,
+    commitBreakdown: {
+      fixes: commitsByType.fixes.length,
+      features: commitsByType.features.length,
+      refactors: commitsByType.refactors.length,
+      docs: commitsByType.docs.length,
+      tests: commitsByType.tests.length,
+      other: commitsByType.other.length
+    },
+    workingStyle,
+    topMonths,
+    totalAnalyzed: totalCommits
+  };
 }
 
 /**
@@ -259,16 +507,40 @@ async function handleRequest(request, env, ctx) {
             { name: 'awesome-project', fullName: 'demouser/awesome-project', commits: 234, stars: 1250, language: 'JavaScript' },
             { name: 'react-dashboard', fullName: 'demouser/react-dashboard', commits: 189, stars: 892, language: 'TypeScript' },
             { name: 'python-api', fullName: 'demouser/python-api', commits: 156, stars: 445, language: 'Python' },
-            { name: 'mobile-app', fullName: 'demouser/mobile-app', commits: 98, stars: 321, language: 'Dart' },
-            { name: 'rust-cli', fullName: 'demouser/rust-cli', commits: 87, stars: 234, language: 'Rust' },
           ],
           topLanguages: [
             { language: 'JavaScript', commits: 312 },
             { language: 'TypeScript', commits: 245 },
             { language: 'Python', commits: 178 },
-            { language: 'Rust', commits: 87 },
-            { language: 'Go', commits: 25 },
           ],
+        },
+        insights: {
+          story: "This year, you transformed from a JavaScript enthusiast into a full-stack powerhouse. You tackled ambitious projects, conquered tricky bugs, and shipped features that users loved.",
+          mainTheme: "Building with purpose, one commit at a time",
+          biggestStruggles: [
+            "Wrestling with TypeScript types in the react-dashboard refactor - but you emerged victorious with cleaner, safer code",
+            "Debugging the authentication flow that took 3 days and 47 commits, teaching you patience and systematic problem-solving",
+            "Migrating the Python API to async/await, a challenge that ultimately made you a better async programmer"
+          ],
+          proudMoments: [
+            "Shipped the awesome-project to production with 1,250 stars - users actually love what you built!",
+            "That one-line fix that resolved 3 different bugs - sometimes simplicity is genius",
+            "Mentoring 5 junior developers through code reviews, sharing knowledge and growing the community"
+          ],
+          workStyle: {
+            pace: "steady",
+            approach: "pragmatic",
+            description: "You're a thoughtful builder who values quality over speed, shipping reliable code consistently throughout the year."
+          },
+          topicsExplored: [
+            "React Performance Optimization",
+            "TypeScript Advanced Patterns",
+            "Python Async Programming",
+            "API Design Best Practices",
+            "Test-Driven Development"
+          ],
+          evolutionInsight: "You started the year building features quickly, then shifted mid-year to focus on code quality and architecture. By year's end, you found the perfect balance between speed and craftsmanship.",
+          funFact: "Your most productive month was July with 156 commits - seems like summer coding suits you! ☀️"
         },
         generatedAt: new Date().toISOString(),
       };

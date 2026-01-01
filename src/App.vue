@@ -1,77 +1,58 @@
 <template>
   <div class="app">
-    <header class="header">
-      <div class="container">
-        <h1 class="logo">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
-          </svg>
-          GitHub Wrapped
-        </h1>
-      </div>
-    </header>
-
     <main class="main">
       <div class="container">
         <!-- Input Form -->
         <div v-if="!wrappedData && !loading" class="form-section fade-in">
-          <h2 class="title">See Your GitHub Year in Review</h2>
-          <p class="subtitle">Enter a GitHub username or organization to generate their wrapped</p>
+          <h1 class="form-title">Your GitHub Year</h1>
+          <p class="form-subtitle">Enter a username to reveal their story</p>
           
           <form @submit.prevent="fetchWrapped" class="form">
-            <div class="info-box">
-              <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
-                <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/>
-                <path d="m8.93 6.588-2.29.287-.082.38.45.083c.294.07.352.176.288.469l-.738 3.468c-.194.897.105 1.319.808 1.319.545 0 1.178-.252 1.465-.598l.088-.416c-.2.176-.492.246-.686.246-.275 0-.375-.193-.304-.533L8.93 6.588zM9 4.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0z"/>
-              </svg>
-              <div>
-                <strong>Note:</strong> Due to GitHub API rate limits, providing an API token is recommended for best results, especially for accounts with many repositories.
-              </div>
-            </div>
-
             <div class="form-group">
-              <label for="username">GitHub Username or Organization</label>
               <input
                 id="username"
                 v-model="username"
                 type="text"
-                placeholder="e.g., octocat"
+                placeholder="GitHub username..."
                 required
+                class="input-main"
               />
             </div>
 
             <div class="advanced-toggle">
               <button type="button" @click="showAdvanced = !showAdvanced" class="toggle-btn">
-                {{ showAdvanced ? '▼' : '▶' }} Advanced Options
+                {{ showAdvanced ? '−' : '+' }} Options
               </button>
             </div>
 
             <div v-if="showAdvanced" class="advanced-options fade-in">
-              <div class="form-group">
-                <label for="year">Year</label>
-                <select id="year" v-model="year">
-                  <option value="2025">2025</option>
-                  <option value="2024">2024</option>
-                  <option value="2023">2023</option>
-                  <option value="2022">2022</option>
-                  <option value="2021">2021</option>
-                </select>
-              </div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="year">Year</label>
+                  <select id="year" v-model="year" class="select-input">
+                    <option value="2025">2025</option>
+                    <option value="2024">2024</option>
+                    <option value="2023">2023</option>
+                    <option value="2022">2022</option>
+                    <option value="2021">2021</option>
+                  </select>
+                </div>
 
-              <div class="form-group">
-                <label for="token">GitHub API Token (Optional - for private repos)</label>
-                <input
-                  id="token"
-                  v-model="apiToken"
-                  type="password"
-                  placeholder="ghp_xxxxxxxxxxxx"
-                />
-                <small>Token is never stored, only used for API requests</small>
+                <div class="form-group">
+                  <label for="token">API Token</label>
+                  <input
+                    id="token"
+                    v-model="apiToken"
+                    type="password"
+                    placeholder="Optional"
+                    class="select-input"
+                  />
+                </div>
               </div>
             </div>
 
             <button type="submit" class="submit-btn" :disabled="!username.trim()">
-              Generate Wrapped
+              Generate
             </button>
           </form>
 
@@ -83,21 +64,15 @@
         <!-- Loading State -->
         <div v-if="loading" class="loading-section fade-in">
           <div class="spinner"></div>
-          <p>Analyzing GitHub activity...</p>
+          <p class="loading-text">Reading your story...</p>
         </div>
 
         <!-- Wrapped Display -->
-        <div v-if="wrappedData && !loading" class="wrapped-section fade-in">
+        <div v-if="wrappedData && !loading">
           <GitHubWrapped :data="wrappedData" @reset="reset" />
         </div>
       </div>
     </main>
-
-    <footer class="footer">
-      <div class="container">
-        <p>Made with ❤️ using Vue.js and Cloudflare Workers</p>
-      </div>
-    </footer>
   </div>
 </template>
 
@@ -181,204 +156,195 @@ export default {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
-}
-
-.header {
-  background: var(--bg-secondary);
-  border-bottom: 1px solid var(--border);
-  padding: 1.5rem 0;
-}
-
-.logo {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  font-size: 1.5rem;
-  font-weight: 700;
-  color: var(--text-primary);
-}
-
-.logo svg {
-  color: var(--accent);
+  background: var(--bg-primary);
 }
 
 .main {
   flex: 1;
-  padding: 3rem 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-xl) 0;
+  min-height: 100vh;
 }
 
 .form-section {
-  max-width: 600px;
+  max-width: 500px;
   margin: 0 auto;
+  text-align: center;
 }
 
-.title {
-  font-size: 2.5rem;
+.form-title {
+  font-size: var(--font-hero);
   font-weight: 700;
-  text-align: center;
-  margin-bottom: 1rem;
-  background: linear-gradient(135deg, var(--accent) 0%, var(--success) 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  margin-bottom: var(--space-md);
+  color: var(--text-primary);
+  letter-spacing: -0.02em;
 }
 
-.subtitle {
-  text-align: center;
+.form-subtitle {
+  font-size: var(--font-body-lg);
   color: var(--text-secondary);
-  margin-bottom: 2rem;
-  font-size: 1.1rem;
+  margin-bottom: var(--space-xl);
 }
 
 .form {
-  background: var(--bg-secondary);
-  padding: 2rem;
-  border-radius: 12px;
-  border: 1px solid var(--border);
-}
-
-.info-box {
-  display: flex;
-  gap: 0.75rem;
-  padding: 1rem;
-  background: rgba(88, 166, 255, 0.1);
-  border: 1px solid rgba(88, 166, 255, 0.3);
-  border-radius: 8px;
-  margin-bottom: 1.5rem;
-  font-size: 0.9rem;
-  color: var(--text-secondary);
-}
-
-.info-box svg {
-  flex-shrink: 0;
-  margin-top: 0.1rem;
-  color: var(--accent);
-}
-
-.info-box strong {
-  color: var(--text-primary);
+  margin-top: var(--space-lg);
 }
 
 .form-group {
-  margin-bottom: 1.5rem;
+  margin-bottom: var(--space-lg);
 }
 
 .form-group label {
   display: block;
-  margin-bottom: 0.5rem;
-  font-weight: 500;
-  color: var(--text-primary);
-}
-
-.form-group input,
-.form-group select {
-  width: 100%;
-  padding: 0.75rem;
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--text-primary);
-  font-size: 1rem;
-}
-
-.form-group input:focus,
-.form-group select:focus {
-  border-color: var(--accent);
-}
-
-.form-group small {
-  display: block;
-  margin-top: 0.5rem;
+  margin-bottom: var(--space-sm);
+  font-size: var(--font-caption);
   color: var(--text-secondary);
-  font-size: 0.875rem;
+  text-align: left;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.input-main {
+  width: 100%;
+  padding: var(--space-md) var(--space-lg);
+  background: var(--bg-secondary);
+  border: 2px solid transparent;
+  border-radius: 12px;
+  color: var(--text-primary);
+  font-size: var(--font-body-lg);
+  transition: all 0.2s ease;
+  text-align: center;
+}
+
+.input-main:focus {
+  border-color: var(--accent-primary);
+  background: var(--bg-elevated);
+}
+
+.input-main::placeholder {
+  color: var(--text-secondary);
+  opacity: 0.6;
+}
+
+.select-input {
+  width: 100%;
+  padding: var(--space-md);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-size: var(--font-body);
+}
+
+.select-input:focus {
+  border-color: var(--accent-primary);
 }
 
 .advanced-toggle {
-  margin-bottom: 1rem;
+  margin: var(--space-lg) 0;
 }
 
 .toggle-btn {
   background: transparent;
-  color: var(--accent);
-  font-size: 0.9rem;
-  padding: 0.5rem 0;
+  color: var(--text-secondary);
+  font-size: var(--font-caption);
+  padding: var(--space-sm) 0;
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: var(--space-sm);
+  margin: 0 auto;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  transition: color 0.2s ease;
 }
 
 .toggle-btn:hover {
-  color: var(--accent-hover);
+  color: var(--text-primary);
 }
 
 .advanced-options {
-  padding: 1rem;
-  background: var(--bg-tertiary);
-  border-radius: 8px;
-  margin-bottom: 1.5rem;
+  margin-top: var(--space-lg);
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-md);
 }
 
 .submit-btn {
   width: 100%;
-  padding: 1rem;
-  background: var(--accent);
-  color: white;
-  font-weight: 600;
-  font-size: 1rem;
-  border-radius: 6px;
-  transition: background 0.2s;
+  padding: var(--space-md) var(--space-xl);
+  background: var(--accent-primary);
+  color: var(--bg-primary);
+  font-weight: 700;
+  font-size: var(--font-body);
+  border-radius: 24px;
+  transition: all 0.2s ease;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-top: var(--space-lg);
 }
 
 .submit-btn:hover:not(:disabled) {
-  background: var(--accent-hover);
+  transform: scale(1.02);
+  box-shadow: 0 8px 24px rgba(29, 185, 84, 0.3);
 }
 
 .submit-btn:disabled {
-  opacity: 0.5;
+  opacity: 0.3;
   cursor: not-allowed;
 }
 
 .error-message {
-  margin-top: 1rem;
-  padding: 1rem;
-  background: rgba(248, 81, 73, 0.1);
-  border: 1px solid rgba(248, 81, 73, 0.3);
-  border-radius: 6px;
-  color: #f85149;
-  text-align: center;
+  margin-top: var(--space-lg);
+  padding: var(--space-md);
+  background: rgba(255, 165, 0, 0.1);
+  border: 1px solid rgba(255, 165, 0, 0.3);
+  border-radius: 8px;
+  color: var(--accent-warning);
+  font-size: var(--font-caption);
 }
 
 .loading-section {
   text-align: center;
-  padding: 3rem;
+  padding: var(--space-xl);
 }
 
 .spinner {
-  width: 50px;
-  height: 50px;
-  border: 4px solid var(--border);
-  border-top-color: var(--accent);
+  width: 60px;
+  height: 60px;
+  border: 3px solid var(--bg-elevated);
+  border-top-color: var(--accent-primary);
   border-radius: 50%;
   animation: spin 1s linear infinite;
-  margin: 0 auto 1rem;
+  margin: 0 auto var(--space-lg);
 }
 
-.footer {
-  background: var(--bg-secondary);
-  border-top: 1px solid var(--border);
-  padding: 2rem 0;
-  text-align: center;
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.loading-text {
+  font-size: var(--font-body-lg);
   color: var(--text-secondary);
-  margin-top: auto;
 }
 
 @media (max-width: 768px) {
-  .title {
-    font-size: 2rem;
+  .form-title {
+    font-size: 2.5rem;
   }
   
-  .form {
-    padding: 1.5rem;
+  .form-row {
+    grid-template-columns: 1fr;
+  }
+  
+  .main {
+    padding: var(--space-lg) 0;
   }
 }
 </style>
