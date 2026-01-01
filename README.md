@@ -191,6 +191,31 @@ The worker will automatically include the built frontend from the `dist/` folder
 - Verify `wrangler.toml` has the correct `[assets]` configuration
 - Test locally first with `npm run dev:local` to verify everything works
 
+### Version Management and Cache Invalidation
+
+**Important:** This project includes automatic cache invalidation on new releases. The cache key includes the version number from `package.json`, so each new version automatically invalidates old cached data.
+
+**When deploying a new version:**
+
+1. Update the version in `package.json` using npm version:
+   ```bash
+   # For bug fixes
+   npm version patch
+   
+   # For new features
+   npm version minor
+   
+   # For breaking changes
+   npm version major
+   ```
+
+2. Deploy as usual:
+   ```bash
+   npm run deploy
+   ```
+
+This ensures that users always get fresh data after a deployment, preventing issues where old (potentially broken) cached data continues to be served.
+
 ### Configuration Details
 
 The deployment uses Cloudflare Workers Assets (modern approach) configured in `wrangler.toml`:
@@ -246,7 +271,7 @@ Fetches GitHub wrapped data for a user.
 - **Logging**: Enhanced logging for debugging operations and tracking API calls
 - **Commit Data**: Collects commit messages, dates, branches, and file change statistics
 - **Repository Scanning**: Fetches all repositories where the user has contributed in the past year
-- **Smart Caching**: Results are cached for 1 hour to reduce API calls
+- **Smart Caching**: Results are cached for 1 hour to reduce API calls. Cache keys include the application version from `package.json`, ensuring automatic cache invalidation when a new version is deployed.
 
 **Response:**
 ```json

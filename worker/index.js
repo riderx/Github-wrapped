@@ -3,6 +3,11 @@
  * Handles GitHub API requests with caching support
  */
 
+import packageJson from '../package.json' with { type: 'json' };
+
+// Application version from package.json
+const APP_VERSION = packageJson.version;
+
 // CORS headers
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -730,8 +735,8 @@ async function handleRequest(request, env, ctx) {
       });
     }
     
-    // Create cache key
-    const cacheKey = `wrapped:${username}:${year}${token ? ':private' : ''}`;
+    // Create cache key with version to invalidate cache on new releases
+    const cacheKey = `wrapped:v${APP_VERSION}:${username}:${year}${token ? ':private' : ''}`;
     
     // Try to get from cache
     const cache = caches.default;
