@@ -31,11 +31,3 @@ jobs:
       
       - name: Validate worker syntax
         run: node --check worker/index.js
-      
-      - name: Check for syntax errors in worker
-        run: |
-          if node --check worker/index.js 2>&1 | grep -i error; then
-            echo "Worker has syntax errors"
-            exit 1
-          fi
-          echo "Worker syntax is valid"
