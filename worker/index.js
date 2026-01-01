@@ -277,7 +277,9 @@ async function getAllCommitsForRepo(owner, repo, username, year, token) {
   let cursor = null;
   let hasNextPage = true;
   let pageCount = 0;
-  const maxPages = 50; // Limit to prevent excessive API calls (50 pages * 100 = 5000 commits max per repo)
+  // Limit to 10 pages (1000 commits) per repo to balance completeness with performance
+  // Most developers have fewer than 1000 commits per repo per year
+  const maxPages = 10;
   
   while (hasNextPage && pageCount < maxPages) {
     const result = await getDetailedCommitsForRepo(owner, repo, username, year, token, cursor);
@@ -285,6 +287,11 @@ async function getAllCommitsForRepo(owner, repo, username, year, token) {
     hasNextPage = result.hasNextPage;
     cursor = result.endCursor;
     pageCount++;
+    
+    // Stop early if we got no commits (author filter excluded all)
+    if (result.commits.length === 0 && allCommits.length === 0) {
+      break;
+    }
   }
   
   return allCommits;
