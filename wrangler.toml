@@ -1,0 +1,9 @@
+name = "github-wrapped-worker"
+main = "worker/index.js"
+compatibility_date = "2024-01-01"
+
+[build]
+command = ""
+
+[[routes]]
+pattern = "/api/*"
