@@ -6,16 +6,18 @@ A beautiful web application that creates a "Spotify Wrapped" style visualization
 
 ✨ **Highlights**
 - 📊 View GitHub activity wrapped for any user or organization
-- 🔒 Support for private repositories with API token
+- 🔒 **Requires GitHub API token** for comprehensive and accurate data
 - 📅 Choose any year (defaults to 2025)
 - 💾 Smart caching with Cloudflare Workers
 - 🎨 Beautiful, responsive UI with animations
 - 📱 Mobile-friendly design
+- 📈 Comprehensive code change statistics (additions, deletions, files changed)
 
 **What You'll See:**
 - Total commits, pull requests, issues, and code reviews
+- **Detailed code changes:** Lines added, removed, and files modified
 - Top 5 programming languages used
-- Most active repositories
+- Most active repositories with commit counts
 - Follower/following stats
 - Beautiful visualizations and stats cards
 
@@ -76,22 +78,32 @@ The complete application (frontend + API) will be available at `http://localhost
 
 1. Open the app in your browser
 2. Enter a GitHub username or organization name
-3. (Optional) Click "Advanced Options" to:
-   - Select a different year
-   - Add a GitHub API token for private repository access
-4. Click "Generate Wrapped" to see the results!
+3. **Required:** Click "Advanced Options" and add your GitHub API token
+   - Without a token, the app will not be able to fetch comprehensive data
+4. (Optional) Select a different year
+5. Click "Generate" to see the results!
 
-**Demo Mode:** Enter `demo` or `demouser` as the username to see a demonstration with mock data.
+**Demo Mode:** Enter `demo` or `demouser` as the username to see a demonstration with mock data (no token required for demo).
 
-### GitHub API Token
+### GitHub API Token (Required)
 
-To view private repository data, you'll need a GitHub Personal Access Token:
+**Important:** This application now uses GitHub's GraphQL API to provide comprehensive and accurate commit data. A GitHub Personal Access Token is **required** for all real users.
+
+**Why is a token required?**
+- To access complete commit history across all repositories
+- To get accurate code change statistics (lines added/removed)
+- To avoid rate limits and ensure reliable data fetching
+- To access private repositories (if needed)
+
+**How to get your token:**
 
 1. Go to GitHub Settings → Developer settings → Personal access tokens → Tokens (classic)
-2. Generate a new token with `repo` scope
+2. Generate a new token with the following scopes:
+   - `repo` (Full control of private repositories) - Required
+   - `read:user` (Read user profile data) - Recommended
 3. Copy the token and paste it in the "API Token" field (in Advanced Options)
 
-**Note:** The token is never stored and only used for API requests.
+**Note:** The token is never stored and only used for API requests during your session.
 
 ## Deployment
 
@@ -219,7 +231,7 @@ Fetches GitHub wrapped data for a user.
 **Query Parameters:**
 - `username` (required): GitHub username or organization
 - `year` (optional): Year to generate wrapped for (default: 2025)
-- `token` (optional): GitHub API token for private repo access
+- `token` (required for non-demo users): GitHub API token for comprehensive data access
 
 **Response:**
 ```json
@@ -241,7 +253,13 @@ Fetches GitHub wrapped data for a user.
     "reviews": 30,
     "repositoriesContributed": 10,
     "topRepositories": [...],
-    "topLanguages": [...]
+    "topLanguages": [...],
+    "codeChanges": {
+      "additions": 15432,
+      "deletions": 8234,
+      "filesChanged": 423,
+      "linesChanged": 23666
+    }
   }
 }
 ```
@@ -250,7 +268,7 @@ Fetches GitHub wrapped data for a user.
 
 - **Frontend**: Vue.js 3, Vite
 - **Backend**: Cloudflare Workers
-- **API**: GitHub REST API v3
+- **API**: GitHub GraphQL API v4 (for comprehensive data access)
 - **Caching**: Cloudflare Workers Cache API
 - **Styling**: CSS3 with custom properties
 
