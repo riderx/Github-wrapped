@@ -230,6 +230,52 @@ async function handleRequest(request, env, ctx) {
       );
     }
     
+    // Demo mode for testing
+    if (username.toLowerCase() === 'demo' || username.toLowerCase() === 'demouser') {
+      const demoData = {
+        user: {
+          login: 'demouser',
+          name: 'Demo User',
+          avatar: 'https://avatars.githubusercontent.com/u/583231?v=4',
+          bio: 'This is a demo account to showcase GitHub Wrapped',
+          location: 'San Francisco, CA',
+          publicRepos: 42,
+          followers: 1234,
+          following: 567,
+        },
+        year: parseInt(year),
+        stats: {
+          totalCommits: 847,
+          pullRequests: 152,
+          issues: 43,
+          reviews: 89,
+          repositoriesContributed: 15,
+          topRepositories: [
+            { name: 'awesome-project', fullName: 'demouser/awesome-project', commits: 234, stars: 1250, language: 'JavaScript' },
+            { name: 'react-dashboard', fullName: 'demouser/react-dashboard', commits: 189, stars: 892, language: 'TypeScript' },
+            { name: 'python-api', fullName: 'demouser/python-api', commits: 156, stars: 445, language: 'Python' },
+            { name: 'mobile-app', fullName: 'demouser/mobile-app', commits: 98, stars: 321, language: 'Dart' },
+            { name: 'rust-cli', fullName: 'demouser/rust-cli', commits: 87, stars: 234, language: 'Rust' },
+          ],
+          topLanguages: [
+            { language: 'JavaScript', commits: 312 },
+            { language: 'TypeScript', commits: 245 },
+            { language: 'Python', commits: 178 },
+            { language: 'Rust', commits: 87 },
+            { language: 'Go', commits: 25 },
+          ],
+        },
+        generatedAt: new Date().toISOString(),
+      };
+      
+      return new Response(JSON.stringify(demoData), {
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'application/json',
+        },
+      });
+    }
+    
     // Create cache key
     const cacheKey = `wrapped:${username}:${year}${token ? ':private' : ''}`;
     

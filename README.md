@@ -63,6 +63,8 @@ The worker API will be available at `http://localhost:8787`
    - Add a GitHub API token for private repository access
 4. Click "Generate Wrapped" to see the results!
 
+**Demo Mode:** Enter `demo` or `demouser` as the username to see a demonstration with mock data.
+
 ### GitHub API Token
 
 To view private repository data, you'll need a GitHub Personal Access Token:
