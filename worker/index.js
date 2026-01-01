@@ -508,6 +508,15 @@ async function generateWrapped(username, year, token, env) {
 }
 
 /**
+ * Create a request for index.html (for SPA routing)
+ */
+function createIndexRequest(originalRequest) {
+  const indexUrl = new URL(originalRequest.url);
+  indexUrl.pathname = '/index.html';
+  return new Request(indexUrl, originalRequest);
+}
+
+/**
  * Handle incoming requests
  */
 async function handleRequest(request, env, ctx) {
@@ -655,10 +664,7 @@ async function handleRequest(request, env, ctx) {
     
     // If the response is a 404 and not an API route, serve index.html for SPA routing
     if (response.status === 404 && !path.startsWith('/api')) {
-      // Create a new request for index.html
-      const indexUrl = new URL(request.url);
-      indexUrl.pathname = '/index.html';
-      return await env.ASSETS.fetch(new Request(indexUrl, request));
+      return await env.ASSETS.fetch(createIndexRequest(request));
     }
     
     return response;
@@ -666,9 +672,7 @@ async function handleRequest(request, env, ctx) {
     // Fallback: try to serve index.html for SPA routing
     if (!path.startsWith('/api')) {
       try {
-        const indexUrl = new URL(request.url);
-        indexUrl.pathname = '/index.html';
-        return await env.ASSETS.fetch(new Request(indexUrl, request));
+        return await env.ASSETS.fetch(createIndexRequest(request));
       } catch (indexError) {
         return new Response('Not Found', { status: 404, headers: corsHeaders });
       }
