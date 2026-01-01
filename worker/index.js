@@ -17,6 +17,7 @@ const CACHE_TTL = 3600;
 const MAX_REPO_PAGES = 10; // Maximum number of pages to fetch (100 repos per page)
 const MAX_REPOS_TO_CHECK = 20; // Maximum number of repos to check for commits
 const TOP_REPOS_TO_SHOW = 5; // Number of top repositories to display
+const MAX_DETAILED_COMMITS_PER_REPO = 50; // Maximum commits to fetch details for per repository
 
 /**
  * Fetch GitHub API with authentication
@@ -134,8 +135,8 @@ async function getRepoCommits(owner, repo, username, year, token, includeDetails
     // If detailed information is requested, fetch each commit's full details
     if (includeDetails) {
       const detailedCommits = [];
-      // Limit to avoid excessive API calls - fetch details for up to 50 commits per repo
-      const commitsToDetail = commits.slice(0, 50);
+      // Limit to avoid excessive API calls
+      const commitsToDetail = commits.slice(0, MAX_DETAILED_COMMITS_PER_REPO);
       
       for (const commit of commitsToDetail) {
         const details = await getCommitDetails(owner, repo, commit.sha, token);
@@ -152,16 +153,12 @@ async function getRepoCommits(owner, repo, username, year, token, includeDetails
       return detailedCommits;
     }
     
-    // Return basic commits with message and date
+    // Return basic commits with message and date (maintain backward compatibility)
     return commits.map(commit => ({
       sha: commit.sha,
       message: commit.commit.message,
       date: commit.commit.author.date,
-      repo: `${owner}/${repo}`,
-      author: {
-        name: commit.commit.author.name,
-        email: commit.commit.author.email
-      }
+      repo: `${owner}/${repo}`
     }));
   } catch (error) {
     console.error(`Error fetching commits for ${owner}/${repo}:`, error);
@@ -498,9 +495,14 @@ async function generateWrapped(username, year, token, env, includeDetails = fals
       allCommits = allCommits.concat(commits); // Collect all commits for AI analysis
       
       // Calculate total code changes if detailed info is available
+      let repoAdditions = 0;
+      let repoDeletions = 0;
       if (includeDetails) {
-        const repoAdditions = commits.reduce((sum, c) => sum + (c.stats?.additions || 0), 0);
-        const repoDeletions = commits.reduce((sum, c) => sum + (c.stats?.deletions || 0), 0);
+        // Calculate once and reuse
+        for (const commit of commits) {
+          repoAdditions += commit.stats?.additions || 0;
+          repoDeletions += commit.stats?.deletions || 0;
+        }
         totalAdditions += repoAdditions;
         totalDeletions += repoDeletions;
       }
@@ -511,8 +513,8 @@ async function generateWrapped(username, year, token, env, includeDetails = fals
         commits: commits.length,
         stars: repo.stargazers_count,
         language: repo.language,
-        additions: includeDetails ? commits.reduce((sum, c) => sum + (c.stats?.additions || 0), 0) : undefined,
-        deletions: includeDetails ? commits.reduce((sum, c) => sum + (c.stats?.deletions || 0), 0) : undefined,
+        additions: includeDetails ? repoAdditions : undefined,
+        deletions: includeDetails ? repoDeletions : undefined,
       });
       
       // Track language usage
