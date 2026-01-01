@@ -655,7 +655,6 @@ async function handleRequest(request, env, ctx) {
     return new Response('Not Found', { status: 404, headers: corsHeaders });
   }
 }
-}
 
 export default {
   fetch: handleRequest,
