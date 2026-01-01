@@ -3,12 +3,35 @@
  * Handles GitHub API requests with caching support
  */
 
-// CORS headers
+/**
+ * Get CORS headers for a request
+ */
+function getCorsHeaders(request) {
+  const origin = request.headers.get('Origin') || '*';
+  
+  // For credentials to work, we need to set specific origin
+  if (origin !== '*') {
+    return {
+      'Access-Control-Allow-Origin': origin,
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Cookie',
+      'Access-Control-Allow-Credentials': 'true',
+    };
+  }
+  
+  // Fallback for non-credentialed requests
+  return {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+  };
+}
+
+// Legacy CORS headers for backward compatibility
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Cookie',
-  'Access-Control-Allow-Credentials': 'true',
+  'Access-Control-Allow-Headers': 'Content-Type',
 };
 
 // Cache TTL: 1 hour
@@ -659,7 +682,7 @@ function getSessionToken(request) {
 /**
  * Handle OAuth login initiation
  */
-function handleOAuthLogin(env) {
+function handleOAuthLogin(env, corsHeaders) {
   const clientId = env.GITHUB_CLIENT_ID;
   
   if (!clientId) {
@@ -700,7 +723,7 @@ function handleOAuthLogin(env) {
 /**
  * Handle OAuth callback
  */
-async function handleOAuthCallback(request, env) {
+async function handleOAuthCallback(request, env, corsHeaders) {
   const url = new URL(request.url);
   const code = url.searchParams.get('code');
   const state = url.searchParams.get('state');
@@ -794,7 +817,7 @@ async function handleOAuthCallback(request, env) {
 /**
  * Handle logout
  */
-function handleLogout() {
+function handleLogout(corsHeaders) {
   // Clear session cookie
   const clearCookie = `${SESSION_COOKIE_NAME}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
   
@@ -813,7 +836,7 @@ function handleLogout() {
 /**
  * Get current user info from session
  */
-async function handleUserInfo(request) {
+async function handleUserInfo(request, corsHeaders) {
   const token = getSessionToken(request);
   
   if (!token) {
@@ -878,6 +901,7 @@ function createIndexRequest(originalRequest) {
  */
 async function handleRequest(request, env, ctx) {
   const url = new URL(request.url);
+  const corsHeaders = getCorsHeaders(request);
   
   // Handle CORS preflight
   if (request.method === 'OPTIONS') {
@@ -889,19 +913,19 @@ async function handleRequest(request, env, ctx) {
   
   // OAuth routes
   if (path === '/api/oauth/login') {
-    return handleOAuthLogin(env);
+    return handleOAuthLogin(env, corsHeaders);
   }
   
   if (path === '/api/oauth/callback') {
-    return await handleOAuthCallback(request, env);
+    return await handleOAuthCallback(request, env, corsHeaders);
   }
   
   if (path === '/api/oauth/logout') {
-    return handleLogout();
+    return handleLogout(corsHeaders);
   }
   
   if (path === '/api/user') {
-    return await handleUserInfo(request);
+    return await handleUserInfo(request, corsHeaders);
   }
   
   // API routes
