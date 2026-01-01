@@ -648,6 +648,13 @@ function generateState() {
 
 /**
  * Create session cookie
+ * 
+ * Note: For enhanced security in production, consider using a session store (like Cloudflare KV)
+ * with a session ID instead of storing the GitHub token directly in the cookie.
+ * This would provide additional protection against cookie theft attacks.
+ * 
+ * Current implementation stores the token directly for simplicity and to avoid
+ * additional infrastructure dependencies (KV storage).
  */
 function createSessionCookie(token, maxAge = SESSION_EXPIRY) {
   const expires = new Date(Date.now() + maxAge * 1000).toUTCString();
@@ -683,7 +690,10 @@ function getSessionToken(request) {
  * Get OAuth redirect URI
  */
 function getOAuthRedirectUri(env) {
-  return env.OAUTH_REDIRECT_URI || `${env.APP_URL || 'https://github-wrapped.your-subdomain.workers.dev'}/api/oauth/callback`;
+  if (!env.OAUTH_REDIRECT_URI && !env.APP_URL) {
+    throw new Error('Either OAUTH_REDIRECT_URI or APP_URL must be configured');
+  }
+  return env.OAUTH_REDIRECT_URI || `${env.APP_URL}/api/oauth/callback`;
 }
 
 /**
@@ -1011,7 +1021,7 @@ async function handleRequest(request, env, ctx) {
     
     if (!username) {
       return new Response(
-        JSON.stringify({ error: 'Username is required. Please provide a username or sign in.' }),
+        JSON.stringify({ error: 'Username is required. Please sign in to view your own stats or provide a username to view someone else\'s.' }),
         { 
           status: 400, 
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }

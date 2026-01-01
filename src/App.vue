@@ -33,7 +33,7 @@
                 id="username"
                 v-model="username"
                 type="text"
-                :placeholder="isAuthenticated ? 'Leave empty to see your own stats' : 'GitHub username...'"
+                :placeholder="isAuthenticated ? 'Optional - defaults to your username' : 'GitHub username...'"
                 class="input-main"
               />
             </div>
@@ -175,7 +175,7 @@ export default {
       const targetUsername = username.value.trim() || (isAuthenticated.value ? currentUser.value.login : '')
       
       if (!targetUsername) {
-        error.value = 'Please enter a username or sign in to view your own stats'
+        error.value = 'Please sign in to view your own stats or provide a username to view someone else\'s.'
         return
       }
 
