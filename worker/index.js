@@ -7,11 +7,18 @@
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
+  'Access-Control-Allow-Headers': 'Content-Type, Cookie',
+  'Access-Control-Allow-Credentials': 'true',
 };
 
 // Cache TTL: 1 hour
 const CACHE_TTL = 3600;
+
+// Session cookie name
+const SESSION_COOKIE_NAME = 'gh_wrapped_session';
+
+// Session expiry: 7 days
+const SESSION_EXPIRY = 7 * 24 * 60 * 60;
 
 // API limits to avoid rate limiting
 const MAX_REPO_PAGES = 10; // Maximum number of pages to fetch (100 repos per page)
@@ -604,6 +611,260 @@ async function generateWrapped(username, year, token, env) {
 }
 
 /**
+ * OAuth Helper Functions
+ */
+
+/**
+ * Generate a random state for OAuth flow
+ */
+function generateState() {
+  const array = new Uint8Array(32);
+  crypto.getRandomValues(array);
+  return Array.from(array, byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * Create session cookie
+ */
+function createSessionCookie(token, maxAge = SESSION_EXPIRY) {
+  const expires = new Date(Date.now() + maxAge * 1000).toUTCString();
+  return `${SESSION_COOKIE_NAME}=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAge}; Expires=${expires}`;
+}
+
+/**
+ * Parse cookies from request
+ */
+function parseCookies(request) {
+  const cookieHeader = request.headers.get('Cookie');
+  if (!cookieHeader) return {};
+  
+  const cookies = {};
+  cookieHeader.split(';').forEach(cookie => {
+    const [name, value] = cookie.trim().split('=');
+    if (name && value) {
+      cookies[name] = value;
+    }
+  });
+  return cookies;
+}
+
+/**
+ * Get session token from cookie
+ */
+function getSessionToken(request) {
+  const cookies = parseCookies(request);
+  return cookies[SESSION_COOKIE_NAME];
+}
+
+/**
+ * Handle OAuth login initiation
+ */
+function handleOAuthLogin(env) {
+  const clientId = env.GITHUB_CLIENT_ID;
+  
+  if (!clientId) {
+    return new Response(
+      JSON.stringify({ error: 'OAuth not configured. Please set GITHUB_CLIENT_ID.' }),
+      { 
+        status: 500,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      }
+    );
+  }
+  
+  const state = generateState();
+  const redirectUri = env.OAUTH_REDIRECT_URI || `${env.APP_URL || 'https://github-wrapped.your-subdomain.workers.dev'}/api/oauth/callback`;
+  
+  // GitHub OAuth authorization URL
+  const authUrl = new URL('https://github.com/login/oauth/authorize');
+  authUrl.searchParams.set('client_id', clientId);
+  authUrl.searchParams.set('redirect_uri', redirectUri);
+  authUrl.searchParams.set('scope', 'read:user');
+  authUrl.searchParams.set('state', state);
+  
+  // Return the authorization URL and state
+  return new Response(
+    JSON.stringify({ 
+      authUrl: authUrl.toString(),
+      state
+    }),
+    {
+      headers: {
+        ...corsHeaders,
+        'Content-Type': 'application/json',
+      }
+    }
+  );
+}
+
+/**
+ * Handle OAuth callback
+ */
+async function handleOAuthCallback(request, env) {
+  const url = new URL(request.url);
+  const code = url.searchParams.get('code');
+  const state = url.searchParams.get('state');
+  
+  if (!code) {
+    return new Response(
+      JSON.stringify({ error: 'Missing authorization code' }),
+      { 
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      }
+    );
+  }
+  
+  const clientId = env.GITHUB_CLIENT_ID;
+  const clientSecret = env.GITHUB_CLIENT_SECRET;
+  const redirectUri = env.OAUTH_REDIRECT_URI || `${env.APP_URL || 'https://github-wrapped.your-subdomain.workers.dev'}/api/oauth/callback`;
+  
+  if (!clientId || !clientSecret) {
+    return new Response(
+      JSON.stringify({ error: 'OAuth not configured' }),
+      { 
+        status: 500,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      }
+    );
+  }
+  
+  try {
+    // Exchange code for access token
+    const tokenResponse = await fetch('https://github.com/login/oauth/access_token', {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        client_id: clientId,
+        client_secret: clientSecret,
+        code,
+        redirect_uri: redirectUri,
+      }),
+    });
+    
+    const tokenData = await tokenResponse.json();
+    
+    if (tokenData.error) {
+      console.error('[OAuth] Error exchanging code:', tokenData);
+      return new Response(
+        JSON.stringify({ error: tokenData.error_description || tokenData.error }),
+        { 
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        }
+      );
+    }
+    
+    const accessToken = tokenData.access_token;
+    
+    // Get user info to verify token
+    const userInfo = await fetchGitHub('https://api.github.com/user', accessToken);
+    
+    // Create session cookie with the access token
+    const sessionCookie = createSessionCookie(accessToken);
+    
+    // Redirect back to the app with success
+    const appUrl = env.APP_URL || url.origin;
+    const redirectUrl = new URL(appUrl);
+    redirectUrl.searchParams.set('oauth', 'success');
+    redirectUrl.searchParams.set('username', userInfo.login);
+    
+    return new Response(null, {
+      status: 302,
+      headers: {
+        'Location': redirectUrl.toString(),
+        'Set-Cookie': sessionCookie,
+      }
+    });
+  } catch (error) {
+    console.error('[OAuth] Callback error:', error);
+    return new Response(
+      JSON.stringify({ error: 'OAuth authentication failed', details: error.message }),
+      { 
+        status: 500,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      }
+    );
+  }
+}
+
+/**
+ * Handle logout
+ */
+function handleLogout() {
+  // Clear session cookie
+  const clearCookie = `${SESSION_COOKIE_NAME}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
+  
+  return new Response(
+    JSON.stringify({ success: true, message: 'Logged out successfully' }),
+    {
+      headers: {
+        ...corsHeaders,
+        'Content-Type': 'application/json',
+        'Set-Cookie': clearCookie,
+      }
+    }
+  );
+}
+
+/**
+ * Get current user info from session
+ */
+async function handleUserInfo(request) {
+  const token = getSessionToken(request);
+  
+  if (!token) {
+    return new Response(
+      JSON.stringify({ authenticated: false }),
+      {
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'application/json',
+        }
+      }
+    );
+  }
+  
+  try {
+    const userInfo = await fetchGitHub('https://api.github.com/user', token);
+    
+    return new Response(
+      JSON.stringify({
+        authenticated: true,
+        user: {
+          login: userInfo.login,
+          name: userInfo.name,
+          avatar: userInfo.avatar_url,
+        }
+      }),
+      {
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'application/json',
+        }
+      }
+    );
+  } catch (error) {
+    // Token is invalid, clear it
+    const clearCookie = `${SESSION_COOKIE_NAME}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
+    
+    return new Response(
+      JSON.stringify({ authenticated: false, error: 'Invalid session' }),
+      {
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'application/json',
+          'Set-Cookie': clearCookie,
+        }
+      }
+    );
+  }
+}
+
+/**
  * Create a request for index.html (for SPA routing)
  */
 function createIndexRequest(originalRequest) {
@@ -626,6 +887,23 @@ async function handleRequest(request, env, ctx) {
   // Parse path
   const path = url.pathname;
   
+  // OAuth routes
+  if (path === '/api/oauth/login') {
+    return handleOAuthLogin(env);
+  }
+  
+  if (path === '/api/oauth/callback') {
+    return await handleOAuthCallback(request, env);
+  }
+  
+  if (path === '/api/oauth/logout') {
+    return handleLogout();
+  }
+  
+  if (path === '/api/user') {
+    return await handleUserInfo(request);
+  }
+  
   // API routes
   if (path === '/api/wrapped') {
     // Get query parameters
@@ -633,9 +911,11 @@ async function handleRequest(request, env, ctx) {
     const year = url.searchParams.get('year') || '2025';
     const tokenFromQuery = url.searchParams.get('token') || null;
     
-    // Support GitHub token from environment variable (for GitHub Actions)
-    // Priority: query parameter > environment variable
-    const token = tokenFromQuery || env.GITHUB_TOKEN || null;
+    // Get token from session cookie
+    const sessionToken = getSessionToken(request);
+    
+    // Priority: query parameter > session token > environment variable
+    const token = tokenFromQuery || sessionToken || env.GITHUB_TOKEN || null;
     
     if (token) {
       console.log('[API] Using GitHub token for authentication');

@@ -6,7 +6,8 @@ A beautiful web application that creates a "Spotify Wrapped" style visualization
 
 ✨ **Highlights**
 - 📊 View GitHub activity wrapped for any user or organization
-- 🔒 Support for private repositories with API token
+- 🔐 GitHub OAuth login for seamless authentication
+- 🔒 Support for private repositories with authenticated access
 - 📅 Choose any year (defaults to 2025)
 - 💾 Smart caching with Cloudflare Workers
 - 🎨 Beautiful, responsive UI with animations
@@ -78,23 +79,45 @@ The complete application (frontend + API) will be available at `http://localhost
 ### Usage
 
 1. Open the app in your browser
-2. Enter a GitHub username or organization name
-3. (Optional) Click "Advanced Options" to:
-   - Select a different year
-   - Add a GitHub API token for private repository access
-4. Click "Generate Wrapped" to see the results!
+2. (Optional) Sign in with GitHub to view your own stats or private repositories
+3. Enter a GitHub username (or leave empty if signed in to see your own stats)
+4. (Optional) Click "Advanced Options" to select a different year
+5. Click "Generate" to see the results!
 
 **Demo Mode:** Enter `demo` or `demouser` as the username to see a demonstration with mock data.
 
-### GitHub API Token
+### GitHub Authentication
 
-To view private repository data or avoid rate limits, you'll need a GitHub Personal Access Token:
+**GitHub OAuth Login (Recommended):**
 
-1. Go to GitHub Settings → Developer settings → Personal access tokens → Tokens (classic)
-2. Generate a new token with `repo` scope
-3. Copy the token and paste it in the "API Token" field (in Advanced Options)
+The app now supports GitHub OAuth login for a seamless experience:
 
-**Note:** The token is never stored and only used for API requests.
+1. Click "Sign in with GitHub" on the main page
+2. Authorize the app to access your GitHub data
+3. Once authenticated, you can:
+   - Leave the username field empty to see your own stats
+   - View data from private repositories you have access to
+   - Avoid GitHub API rate limits
+
+**Setting up OAuth for your deployment:**
+
+1. Create a GitHub OAuth App:
+   - Go to GitHub Settings → Developer settings → OAuth Apps → New OAuth App
+   - Set the Homepage URL to your app's URL (e.g., `https://github-wrapped.your-subdomain.workers.dev`)
+   - Set the Authorization callback URL to `https://your-app-url/api/oauth/callback`
+   - Note your Client ID and Client Secret
+
+2. Configure Cloudflare Worker environment variables:
+   ```bash
+   # Set the Client ID (can be in wrangler.toml or as a secret)
+   wrangler secret put GITHUB_CLIENT_ID
+   
+   # Set the Client Secret (should always be a secret)
+   wrangler secret put GITHUB_CLIENT_SECRET
+   
+   # Set your app URL
+   wrangler secret put APP_URL
+   ```
 
 **For GitHub Actions / Automated Deployment:**
 
@@ -102,7 +125,6 @@ The GitHub token is automatically configured during deployment:
 - When deploying via GitHub Actions, add `GH_API_TOKEN` secret to your repository
 - The deployment workflow automatically passes this as `GITHUB_TOKEN` to the Cloudflare Worker
 - This enables the worker to make authenticated API requests without rate limits
-- The token from the environment variable will be used if no token is provided in the query parameter
 - See the [Setup GitHub Actions Deployment](#setup-github-actions-deployment) section for configuration details
 
 ## Deployment
@@ -228,17 +250,76 @@ This configuration:
 
 ## API Endpoints
 
-### GET `/api/wrapped`
+### Authentication Endpoints
+
+#### GET `/api/oauth/login`
+
+Initiates the GitHub OAuth login flow.
+
+**Response:**
+```json
+{
+  "authUrl": "https://github.com/login/oauth/authorize?...",
+  "state": "random_state_string"
+}
+```
+
+#### GET `/api/oauth/callback`
+
+OAuth callback endpoint. Handles the authorization code from GitHub and sets a session cookie.
+
+**Query Parameters:**
+- `code` (required): Authorization code from GitHub
+- `state` (required): State parameter for CSRF protection
+
+**Response:** Redirects to the app with authentication cookie set.
+
+#### GET `/api/oauth/logout`
+
+Logs out the current user by clearing the session cookie.
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Logged out successfully"
+}
+```
+
+#### GET `/api/user`
+
+Gets the current authenticated user's information.
+
+**Response:**
+```json
+{
+  "authenticated": true,
+  "user": {
+    "login": "octocat",
+    "name": "The Octocat",
+    "avatar": "https://..."
+  }
+}
+```
+
+### Data Endpoints
+
+#### GET `/api/wrapped`
 
 Fetches GitHub wrapped data for a user.
 
 **Query Parameters:**
 - `username` (required): GitHub username or organization
 - `year` (optional): Year to generate wrapped for (default: 2025)
-- `token` (optional): GitHub API token for private repo access
+- `token` (optional): GitHub API token for private repo access (deprecated, use OAuth login instead)
+
+**Authentication:**
+- If user is authenticated via OAuth, their token is automatically used
+- Fallback to environment variable `GITHUB_TOKEN` if no user session exists
+- Query parameter `token` still supported for backward compatibility
 
 **Environment Variables:**
-- `GITHUB_TOKEN` (optional): GitHub API token set in Cloudflare Worker environment. Used when no token is provided in query parameters. This is useful for automated workflows and GitHub Actions.
+- `GITHUB_TOKEN` (optional): GitHub API token set in Cloudflare Worker environment. Used when no token is provided in query parameters or session. This is useful for automated workflows and GitHub Actions.
 
 **Implementation Details:**
 - **Branch Filtering**: Only retrieves commits from the default branch (main or master) of each repository
