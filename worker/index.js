@@ -676,15 +676,20 @@ async function handleRequest(request, env, ctx) {
           reviews: 89,
           repositoriesContributed: 15,
           topRepositories: [
-            { name: 'awesome-project', fullName: 'demouser/awesome-project', commits: 234, stars: 1250, language: 'JavaScript' },
-            { name: 'react-dashboard', fullName: 'demouser/react-dashboard', commits: 189, stars: 892, language: 'TypeScript' },
-            { name: 'python-api', fullName: 'demouser/python-api', commits: 156, stars: 445, language: 'Python' },
+            { name: 'awesome-project', fullName: 'demouser/awesome-project', commits: 234, stars: 1250, language: 'JavaScript', defaultBranch: 'main' },
+            { name: 'react-dashboard', fullName: 'demouser/react-dashboard', commits: 189, stars: 892, language: 'TypeScript', defaultBranch: 'main' },
+            { name: 'python-api', fullName: 'demouser/python-api', commits: 156, stars: 445, language: 'Python', defaultBranch: 'main' },
           ],
           topLanguages: [
             { language: 'JavaScript', commits: 312 },
             { language: 'TypeScript', commits: 245 },
             { language: 'Python', commits: 178 },
           ],
+          commitsByBranch: {
+            main: 765,
+            master: 82,
+            other: 0
+          },
         },
         insights: {
           story: "This year, you transformed from a JavaScript enthusiast into a full-stack powerhouse. You tackled ambitious projects, conquered tricky bugs, and shipped features that users loved.",
