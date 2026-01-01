@@ -13,6 +13,11 @@ const corsHeaders = {
 // Cache TTL: 1 hour
 const CACHE_TTL = 3600;
 
+// API limits to avoid rate limiting
+const MAX_REPO_PAGES = 10; // Maximum number of pages to fetch (100 repos per page)
+const MAX_REPOS_TO_CHECK = 20; // Maximum number of repos to check for commits
+const TOP_REPOS_TO_SHOW = 5; // Number of top repositories to display
+
 /**
  * Fetch GitHub API with authentication
  */
@@ -23,7 +28,7 @@ async function fetchGitHub(url, token = null) {
   };
   
   if (token) {
-    headers['Authorization'] = `token ${token}`;
+    headers['Authorization'] = `Bearer ${token}`;
   }
   
   const response = await fetch(url, { headers });
@@ -56,7 +61,7 @@ async function getUserRepos(username, token) {
   let page = 1;
   let hasMore = true;
   
-  while (hasMore && page <= 10) { // Limit to 10 pages (1000 repos)
+  while (hasMore && page <= MAX_REPO_PAGES) {
     const data = await fetchGitHub(
       `https://api.github.com/users/${username}/repos?per_page=100&page=${page}&sort=updated`,
       token
@@ -119,7 +124,7 @@ async function generateWrapped(username, year, token) {
   // Get repositories (limit to recent ones)
   const repos = await getUserRepos(username, token);
   
-  // Filter repos updated in the target year and limit to top 20 by stars
+  // Filter repos updated in the target year and limit to avoid rate limits
   const targetYear = parseInt(year);
   const filteredRepos = repos
     .filter(repo => {
@@ -127,7 +132,7 @@ async function generateWrapped(username, year, token) {
       return updatedYear >= targetYear - 1; // Include previous year to catch early commits
     })
     .sort((a, b) => b.stargazers_count - a.stargazers_count)
-    .slice(0, 20); // Limit to 20 repos to avoid rate limits
+    .slice(0, MAX_REPOS_TO_CHECK);
   
   // Filter repos and get commits for the specified year
   let totalCommits = 0;
@@ -193,7 +198,7 @@ async function generateWrapped(username, year, token) {
       issues,
       reviews,
       repositoriesContributed: repoContributions.length,
-      topRepositories: repoContributions.slice(0, 5),
+      topRepositories: repoContributions.slice(0, TOP_REPOS_TO_SHOW),
       topLanguages,
     },
     generatedAt: new Date().toISOString(),

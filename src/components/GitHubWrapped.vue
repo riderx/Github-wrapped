@@ -1,5 +1,10 @@
 <template>
   <div class="wrapped">
+    <!-- Toast notification -->
+    <div v-if="showToast" class="toast fade-in">
+      {{ toastMessage }}
+    </div>
+
     <!-- User Header -->
     <div class="user-header fade-in">
       <img :src="data.user.avatar" :alt="data.user.login" class="avatar" />
@@ -131,6 +136,8 @@
 </template>
 
 <script>
+import { ref } from 'vue'
+
 export default {
   name: 'GitHubWrapped',
   props: {
@@ -141,6 +148,9 @@ export default {
   },
   emits: ['reset'],
   setup(props) {
+    const showToast = ref(false)
+    const toastMessage = ref('')
+
     const formatNumber = (num) => {
       return num.toLocaleString()
     }
@@ -174,6 +184,14 @@ export default {
       return colors[language] || '#8b949e'
     }
 
+    const showNotification = (message) => {
+      toastMessage.value = message
+      showToast.value = true
+      setTimeout(() => {
+        showToast.value = false
+      }, 3000)
+    }
+
     const shareWrapped = () => {
       const text = `My ${props.data.year} GitHub Wrapped: ${props.data.stats.totalCommits} commits, ${props.data.stats.repositoriesContributed} repos! 🎉`
       const url = window.location.href
@@ -194,11 +212,15 @@ export default {
 
     const copyToClipboard = (text) => {
       navigator.clipboard.writeText(text).then(() => {
-        alert('Copied to clipboard!')
+        showNotification('✓ Copied to clipboard!')
+      }).catch(() => {
+        showNotification('Unable to copy to clipboard')
       })
     }
 
     return {
+      showToast,
+      toastMessage,
       formatNumber,
       getLanguagePercent,
       getLanguageColor,
@@ -212,6 +234,20 @@ export default {
 .wrapped {
   max-width: 900px;
   margin: 0 auto;
+  position: relative;
+}
+
+.toast {
+  position: fixed;
+  top: 2rem;
+  right: 2rem;
+  background: var(--success);
+  color: white;
+  padding: 1rem 1.5rem;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  z-index: 1000;
+  font-weight: 500;
 }
 
 .user-header {
