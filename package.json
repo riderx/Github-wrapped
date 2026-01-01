@@ -8,7 +8,9 @@
     "build": "vite build",
     "preview": "vite preview",
     "worker:dev": "wrangler dev worker/index.js",
-    "worker:deploy": "wrangler deploy"
+    "worker:deploy": "wrangler deploy",
+    "dev:local": "npm run build && wrangler dev",
+    "deploy": "npm run build && wrangler deploy"
   },
   "keywords": ["github", "wrapped", "vue", "cloudflare-workers"],
   "author": "",

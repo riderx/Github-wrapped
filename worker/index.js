@@ -648,10 +648,31 @@ async function handleRequest(request, env, ctx) {
     return response;
   }
   
-  // Serve static assets from ASSETS binding (Cloudflare Workers Sites)
+  // Serve static assets from ASSETS binding (Cloudflare Workers Assets)
   try {
-    return await env.ASSETS.fetch(request);
+    // Try to get the asset from ASSETS
+    const response = await env.ASSETS.fetch(request);
+    
+    // If the response is a 404 and not an API route, serve index.html for SPA routing
+    if (response.status === 404 && !path.startsWith('/api')) {
+      // Create a new request for index.html
+      const indexUrl = new URL(request.url);
+      indexUrl.pathname = '/index.html';
+      return await env.ASSETS.fetch(new Request(indexUrl, request));
+    }
+    
+    return response;
   } catch (e) {
+    // Fallback: try to serve index.html for SPA routing
+    if (!path.startsWith('/api')) {
+      try {
+        const indexUrl = new URL(request.url);
+        indexUrl.pathname = '/index.html';
+        return await env.ASSETS.fetch(new Request(indexUrl, request));
+      } catch (indexError) {
+        return new Response('Not Found', { status: 404, headers: corsHeaders });
+      }
+    }
     return new Response('Not Found', { status: 404, headers: corsHeaders });
   }
 }
