@@ -1,0 +1,140 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  /* Spotify-inspired minimal palette */
+  --bg-primary: #000000;
+  --bg-secondary: #121212;
+  --bg-elevated: #1E1E1E;
+  
+  --text-primary: #FFFFFF;
+  --text-secondary: #B3B3B3;
+  
+  --accent-primary: #1DB954;
+  --accent-warning: #FFA500;
+  
+  --border: rgba(255, 255, 255, 0.1);
+  
+  /* Spacing scale */
+  --space-xs: 0.25rem;
+  --space-sm: 0.5rem;
+  --space-md: 1rem;
+  --space-lg: 2rem;
+  --space-xl: 4rem;
+  
+  /* Typography scale */
+  --font-hero: 4rem;
+  --font-title: 3rem;
+  --font-heading: 2rem;
+  --font-subheading: 1.5rem;
+  --font-body-lg: 1.125rem;
+  --font-body: 1rem;
+  --font-caption: 0.875rem;
+}
+
+body {
+  font-family: 'Circular', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  line-height: 1.6;
+  font-size: var(--font-body);
+}
+
+#app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+  border: none;
+  outline: none;
+}
+
+input, select {
+  font-family: inherit;
+  outline: none;
+}
+
+a {
+  color: var(--text-primary);
+  text-decoration: none;
+}
+
+a:hover {
+  color: var(--accent-primary);
+}
+
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 var(--space-lg);
+  width: 100%;
+}
+
+/* Typography utilities */
+.text-hero {
+  font-size: var(--font-hero);
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.text-title {
+  font-size: var(--font-title);
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.text-heading {
+  font-size: var(--font-heading);
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+/* Animations - subtle and respectful */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.fade-in {
+  animation: fadeIn 0.6s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Responsive typography */
+@media (max-width: 768px) {
+  :root {
+    --font-hero: 2.5rem;
+    --font-title: 2rem;
+    --font-heading: 1.5rem;
+    --font-subheading: 1.25rem;
+  }
+  
+  .container {
+    padding: 0 var(--space-md);
+  }
+}
