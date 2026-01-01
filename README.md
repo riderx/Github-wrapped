@@ -96,12 +96,14 @@ To view private repository data or avoid rate limits, you'll need a GitHub Perso
 
 **Note:** The token is never stored and only used for API requests.
 
-**For GitHub Actions / Automated Usage:**
+**For GitHub Actions / Automated Deployment:**
 
-You can also provide the token via environment variable:
-- Set `GITHUB_TOKEN` environment variable in your Cloudflare Worker settings
+The GitHub token is automatically configured during deployment:
+- When deploying via GitHub Actions, add `GH_API_TOKEN` secret to your repository
+- The deployment workflow automatically passes this as `GITHUB_TOKEN` to the Cloudflare Worker
+- This enables the worker to make authenticated API requests without rate limits
 - The token from the environment variable will be used if no token is provided in the query parameter
-- This is particularly useful for automated workflows or GitHub Actions
+- See the [Setup GitHub Actions Deployment](#setup-github-actions-deployment) section for configuration details
 
 ## Deployment
 
@@ -143,6 +145,10 @@ The Cloudflare Worker:
    - Add the following secrets:
      - `CLOUDFLARE_API_TOKEN`: Your Cloudflare API token
      - `CLOUDFLARE_ACCOUNT_ID`: Your Cloudflare account ID
+     - `GH_API_TOKEN` (optional): Your GitHub Personal Access Token with `repo` scope
+       - This token will be automatically passed to the Cloudflare Worker as `GITHUB_TOKEN`
+       - Used to avoid GitHub API rate limits when fetching commit data
+       - Without this, the worker will use unauthenticated requests (limited to 60 requests/hour)
 
 3. **Deploy:**
    - Push to `main` branch or manually trigger the workflow
