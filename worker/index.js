@@ -343,29 +343,59 @@ function analyzeCommitMessages(allCommits) {
     .slice(0, 3)
     .map(([month, count]) => ({ month, commits: count }));
   
+  // Generate story and main theme
+  const story = themes.length > 0 
+    ? `This year, you were ${themes[0].title.toLowerCase()}. ${themes[0].description}`
+    : `This year, you made ${totalCommits} commits, building and refining your craft through consistent work.`;
+  
+  const mainTheme = themes.length > 0
+    ? themes[0].description
+    : "Steady progress through dedication and focus";
+  
+  // Format struggles for UI
+  const biggestStruggles = struggles.slice(0, 3).map(s => s.message || "Debugging complex issues and finding solutions");
+  
+  // Format proud moments from features
+  const proudMoments = majorFeatures.slice(0, 3).map(m => m.message || "Shipped meaningful features");
+  
+  // Topics from commit keywords
+  const topicsExplored = [];
+  if (commitsByType.features.length > 0) topicsExplored.push("Feature Development");
+  if (commitsByType.fixes.length > 0) topicsExplored.push("Bug Fixing");
+  if (commitsByType.refactors.length > 0) topicsExplored.push("Code Refactoring");
+  if (commitsByType.tests.length > 0) topicsExplored.push("Testing");
+  if (commitsByType.docs.length > 0) topicsExplored.push("Documentation");
+  
+  // Fun fact from monthly data
+  const funFact = topMonths.length > 0
+    ? `Your most productive month was ${topMonths[0].month} with ${topMonths[0].commits} commits!`
+    : `You maintained a ${workingStyle.commitFrequency.toLowerCase()} pace throughout the year.`;
+  
+  // Evolution insight
+  const evolutionInsight = commitsByLength.substantial.length > commitsByLength.quick.length
+    ? "You evolved toward more detailed, thoughtful commits as the year progressed."
+    : "You maintained a consistent, efficient commit style throughout the year.";
+  
   return {
-    themes,
-    struggles,
-    quickWins,
-    majorFeatures,
-    commitBreakdown: {
-      fixes: commitsByType.fixes.length,
-      features: commitsByType.features.length,
-      refactors: commitsByType.refactors.length,
-      docs: commitsByType.docs.length,
-      tests: commitsByType.tests.length,
-      other: commitsByType.other.length
+    story,
+    mainTheme,
+    biggestStruggles: biggestStruggles.length > 0 ? biggestStruggles : ["Navigating challenges and finding solutions"],
+    proudMoments: proudMoments.length > 0 ? proudMoments : ["Making progress and shipping code"],
+    workStyle: {
+      pace: workingStyle.commitFrequency.toLowerCase().replace(' ', '-'),
+      approach: workingStyle.detailLevel.toLowerCase(),
+      description: `You're a ${workingStyle.detailLevel.toLowerCase()} developer with a ${workingStyle.commitFrequency.toLowerCase()} pace.`
     },
-    workingStyle,
-    topMonths,
-    totalAnalyzed: totalCommits
+    topicsExplored: topicsExplored.length > 0 ? topicsExplored : ["Software Development"],
+    evolutionInsight,
+    funFact
   };
 }
 
 /**
  * Aggregate GitHub statistics for the wrapped
  */
-async function generateWrapped(username, year, token) {
+async function generateWrapped(username, year, token, env) {
   // Get user info
   const userInfo = await getUserInfo(username, token);
   
@@ -382,7 +412,8 @@ async function generateWrapped(username, year, token) {
     .sort((a, b) => b.stargazers_count - a.stargazers_count)
     .slice(0, MAX_REPOS_TO_CHECK);
   
-  // Filter repos and get commits for the specified year
+  // Collect all commits for analysis
+  let allCommits = [];
   let totalCommits = 0;
   let languageStats = {};
   let repoContributions = [];
@@ -393,6 +424,8 @@ async function generateWrapped(username, year, token) {
     
     if (commits.length > 0) {
       totalCommits += commits.length;
+      allCommits = allCommits.concat(commits); // Collect all commits for AI analysis
+      
       repoContributions.push({
         name: repo.name,
         fullName: repo.full_name,
@@ -428,6 +461,26 @@ async function generateWrapped(username, year, token) {
   const issues = yearEvents.filter(e => e.type === 'IssuesEvent').length;
   const reviews = yearEvents.filter(e => e.type === 'PullRequestReviewEvent').length;
   
+  // Generate AI insights from commits
+  let insights = null;
+  if (allCommits.length > 0) {
+    try {
+      // Try AI analysis if env.AI is available
+      if (env && env.AI) {
+        insights = await analyzeCommitsWithAI(allCommits, env);
+      }
+      
+      // Fallback to rule-based analysis if AI fails or unavailable
+      if (!insights) {
+        insights = analyzeCommitMessages(allCommits);
+      }
+    } catch (error) {
+      console.error('Error generating insights:', error);
+      // Use fallback analysis
+      insights = analyzeCommitMessages(allCommits);
+    }
+  }
+  
   return {
     user: {
       login: userInfo.login,
@@ -449,6 +502,7 @@ async function generateWrapped(username, year, token) {
       topRepositories: repoContributions.slice(0, TOP_REPOS_TO_SHOW),
       topLanguages,
     },
+    insights,
     generatedAt: new Date().toISOString(),
   };
 }
@@ -565,8 +619,8 @@ async function handleRequest(request, env, ctx) {
     
     if (!response) {
       try {
-        // Generate wrapped data
-        const wrappedData = await generateWrapped(username, year, token);
+        // Generate wrapped data with AI analysis
+        const wrappedData = await generateWrapped(username, year, token, env);
         
         // Create response
         response = new Response(JSON.stringify(wrappedData), {
