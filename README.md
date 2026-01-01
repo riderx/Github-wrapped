@@ -119,6 +119,8 @@ The app now supports GitHub OAuth login for a seamless experience:
    wrangler secret put APP_URL
    ```
 
+   📖 **For detailed OAuth setup instructions, see [OAUTH_SETUP.md](./OAUTH_SETUP.md)**
+
 **For GitHub Actions / Automated Deployment:**
 
 The GitHub token is automatically configured during deployment:
