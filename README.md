@@ -11,11 +11,14 @@ A beautiful web application that creates a "Spotify Wrapped" style visualization
 - 💾 Smart caching with Cloudflare Workers
 - 🎨 Beautiful, responsive UI with animations
 - 📱 Mobile-friendly design
+- 🌿 Retrieves commits from default branch (main/master) only
+- 🔐 Environment variable support for GitHub token (GITHUB_TOKEN)
 
 **What You'll See:**
 - Total commits, pull requests, issues, and code reviews
 - Top 5 programming languages used
 - Most active repositories
+- Commits breakdown by branch (main/master)
 - Follower/following stats
 - Beautiful visualizations and stats cards
 
@@ -85,13 +88,22 @@ The complete application (frontend + API) will be available at `http://localhost
 
 ### GitHub API Token
 
-To view private repository data, you'll need a GitHub Personal Access Token:
+To view private repository data or avoid rate limits, you'll need a GitHub Personal Access Token:
 
 1. Go to GitHub Settings → Developer settings → Personal access tokens → Tokens (classic)
 2. Generate a new token with `repo` scope
 3. Copy the token and paste it in the "API Token" field (in Advanced Options)
 
 **Note:** The token is never stored and only used for API requests.
+
+**For GitHub Actions / Automated Deployment:**
+
+The GitHub token is automatically configured during deployment:
+- When deploying via GitHub Actions, add `GH_API_TOKEN` secret to your repository
+- The deployment workflow automatically passes this as `GITHUB_TOKEN` to the Cloudflare Worker
+- This enables the worker to make authenticated API requests without rate limits
+- The token from the environment variable will be used if no token is provided in the query parameter
+- See the [Setup GitHub Actions Deployment](#setup-github-actions-deployment) section for configuration details
 
 ## Deployment
 
@@ -133,6 +145,10 @@ The Cloudflare Worker:
    - Add the following secrets:
      - `CLOUDFLARE_API_TOKEN`: Your Cloudflare API token
      - `CLOUDFLARE_ACCOUNT_ID`: Your Cloudflare account ID
+     - `GH_API_TOKEN` (optional): Your GitHub Personal Access Token with `repo` scope
+       - This token will be automatically passed to the Cloudflare Worker as `GITHUB_TOKEN`
+       - Used to avoid GitHub API rate limits when fetching commit data
+       - Without this, the worker will use unauthenticated requests (limited to 60 requests/hour)
 
 3. **Deploy:**
    - Push to `main` branch or manually trigger the workflow
@@ -221,6 +237,17 @@ Fetches GitHub wrapped data for a user.
 - `year` (optional): Year to generate wrapped for (default: 2025)
 - `token` (optional): GitHub API token for private repo access
 
+**Environment Variables:**
+- `GITHUB_TOKEN` (optional): GitHub API token set in Cloudflare Worker environment. Used when no token is provided in query parameters. This is useful for automated workflows and GitHub Actions.
+
+**Implementation Details:**
+- **Branch Filtering**: Only retrieves commits from the default branch (main or master) of each repository
+- **Rate Limiting**: Includes comprehensive rate limit tracking and informative error messages
+- **Logging**: Enhanced logging for debugging operations and tracking API calls
+- **Commit Data**: Collects commit messages, dates, branches, and file change statistics
+- **Repository Scanning**: Fetches all repositories where the user has contributed in the past year
+- **Smart Caching**: Results are cached for 1 hour to reduce API calls
+
 **Response:**
 ```json
 {
@@ -241,8 +268,13 @@ Fetches GitHub wrapped data for a user.
     "reviews": 30,
     "repositoriesContributed": 10,
     "topRepositories": [...],
-    "topLanguages": [...]
-  }
+    "topLanguages": [...],
+    "commitsByBranch": {
+      "main": 350,
+      "master": 150,
+      "other": 0
+    }
+  },
 }
 ```
 

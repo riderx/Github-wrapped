@@ -19,7 +19,7 @@ const MAX_REPOS_TO_CHECK = 20; // Maximum number of repos to check for commits
 const TOP_REPOS_TO_SHOW = 5; // Number of top repositories to display
 
 /**
- * Fetch GitHub API with authentication
+ * Fetch GitHub API with authentication and enhanced error handling
  */
 async function fetchGitHub(url, token = null) {
   const headers = {
@@ -31,15 +31,22 @@ async function fetchGitHub(url, token = null) {
     headers['Authorization'] = `Bearer ${token}`;
   }
   
+  console.log(`[GitHub API] Fetching: ${url}`);
   const response = await fetch(url, { headers });
+  
+  // Log rate limit info
+  const rateLimitRemaining = response.headers.get('X-RateLimit-Remaining');
+  const rateLimitReset = response.headers.get('X-RateLimit-Reset');
+  console.log(`[Rate Limit] Remaining: ${rateLimitRemaining}, Reset: ${rateLimitReset ? new Date(rateLimitReset * 1000).toISOString() : 'N/A'}`);
   
   if (!response.ok) {
     if (response.status === 403) {
-      const rateLimitRemaining = response.headers.get('X-RateLimit-Remaining');
       if (rateLimitRemaining === '0') {
-        throw new Error('GitHub API rate limit exceeded. Please provide an API token or try again later.');
+        const resetTime = rateLimitReset ? new Date(rateLimitReset * 1000).toLocaleString() : 'unknown';
+        throw new Error(`GitHub API rate limit exceeded. Rate limit resets at ${resetTime}. Please provide an API token or try again later.`);
       }
     }
+    console.error(`[GitHub API Error] ${response.status} ${response.statusText} for ${url}`);
     throw new Error(`GitHub API error: ${response.status} ${response.statusText}`);
   }
   
@@ -54,9 +61,10 @@ async function getUserInfo(username, token) {
 }
 
 /**
- * Get user's repositories
+ * Get user's repositories including those they've contributed to
  */
 async function getUserRepos(username, token) {
+  console.log(`[getUserRepos] Fetching repositories for ${username}`);
   const repos = [];
   let page = 1;
   let hasMore = true;
@@ -75,32 +83,98 @@ async function getUserRepos(username, token) {
     }
   }
   
+  console.log(`[getUserRepos] Found ${repos.length} repositories`);
   return repos;
 }
 
 /**
- * Get commits for a repository in a specific year with messages
+ * Get default branch for a repository with fallback strategy
+ */
+async function getDefaultBranch(owner, repo, token) {
+  try {
+    const repoData = await fetchGitHub(
+      `https://api.github.com/repos/${owner}/${repo}`,
+      token
+    );
+    return repoData.default_branch || 'main';
+  } catch (error) {
+    console.error(`[getDefaultBranch] Error fetching default branch for ${owner}/${repo}:`, error.message);
+    
+    // Try to check for common default branches
+    const commonBranches = ['main', 'master'];
+    for (const branch of commonBranches) {
+      try {
+        await fetchGitHub(
+          `https://api.github.com/repos/${owner}/${repo}/branches/${branch}`,
+          token
+        );
+        console.log(`[getDefaultBranch] Found branch ${branch} for ${owner}/${repo}`);
+        return branch;
+      } catch (branchError) {
+        // Branch doesn't exist, try next
+        continue;
+      }
+    }
+    
+    // Final fallback to main if all else fails
+    console.log(`[getDefaultBranch] Using fallback 'main' for ${owner}/${repo}`);
+    return 'main';
+  }
+}
+
+/**
+ * Get commits for a repository in a specific year with messages and changes
+ * Only retrieves commits from the default branch (main/master)
+ * Implements pagination to handle repositories with many commits
  */
 async function getRepoCommits(owner, repo, username, year, token) {
   const since = `${year}-01-01T00:00:00Z`;
   const until = `${year}-12-31T23:59:59Z`;
   
   try {
-    // Fetch commits with details
-    const commits = await fetchGitHub(
-      `https://api.github.com/repos/${owner}/${repo}/commits?author=${username}&since=${since}&until=${until}&per_page=100`,
-      token
-    );
+    // Get the default branch for this repo
+    const defaultBranch = await getDefaultBranch(owner, repo, token);
+    console.log(`[getRepoCommits] Fetching commits from ${owner}/${repo} on branch ${defaultBranch}`);
     
-    // Return commits with message and date
-    return commits.map(commit => ({
+    // Fetch commits from the default branch only with pagination
+    let allCommits = [];
+    let page = 1;
+    const maxPages = 5; // Limit to 500 commits per repo (5 pages * 100 per page)
+    let hasMore = true;
+    
+    while (hasMore && page <= maxPages) {
+      const commits = await fetchGitHub(
+        `https://api.github.com/repos/${owner}/${repo}/commits?author=${username}&since=${since}&until=${until}&per_page=100&page=${page}&sha=${defaultBranch}`,
+        token
+      );
+      
+      if (commits.length === 0) {
+        hasMore = false;
+      } else {
+        allCommits.push(...commits);
+        page++;
+        
+        // If we got fewer than 100, we've reached the end
+        if (commits.length < 100) {
+          hasMore = false;
+        }
+      }
+    }
+    
+    console.log(`[getRepoCommits] Found ${allCommits.length} commits in ${owner}/${repo}`);
+    
+    // Return commits with message, date, and stats
+    return allCommits.map(commit => ({
       sha: commit.sha,
       message: commit.commit.message,
       date: commit.commit.author.date,
-      repo: `${owner}/${repo}`
+      repo: `${owner}/${repo}`,
+      branch: defaultBranch,
+      stats: commit.stats || null, // Include stats if available
+      files: commit.files ? commit.files.length : null // Number of files changed
     }));
   } catch (error) {
-    console.error(`Error fetching commits for ${owner}/${repo}:`, error);
+    console.error(`[getRepoCommits] Error fetching commits for ${owner}/${repo}:`, error.message);
     return [];
   }
 }
@@ -396,8 +470,11 @@ function analyzeCommitMessages(allCommits) {
  * Aggregate GitHub statistics for the wrapped
  */
 async function generateWrapped(username, year, token, env) {
+  console.log(`[generateWrapped] Starting for ${username}, year ${year}`);
+  
   // Get user info
   const userInfo = await getUserInfo(username, token);
+  console.log(`[generateWrapped] User info retrieved for ${userInfo.login}`);
   
   // Get repositories (limit to recent ones)
   const repos = await getUserRepos(username, token);
@@ -412,19 +489,29 @@ async function generateWrapped(username, year, token, env) {
     .sort((a, b) => b.stargazers_count - a.stargazers_count)
     .slice(0, MAX_REPOS_TO_CHECK);
   
+  console.log(`[generateWrapped] Checking ${filteredRepos.length} repositories for commits`);
+  
   // Collect all commits for analysis
   let allCommits = [];
   let totalCommits = 0;
   let languageStats = {};
   let repoContributions = [];
+  let commitsByBranch = { main: 0, master: 0, other: 0 };
   
   for (const repo of filteredRepos) {
-    // Get commits for this repo
+    // Get commits for this repo (from default branch only)
     const commits = await getRepoCommits(repo.owner.login, repo.name, username, year, token);
     
     if (commits.length > 0) {
       totalCommits += commits.length;
       allCommits = allCommits.concat(commits); // Collect all commits for AI analysis
+      
+      // Track commits by branch
+      commits.forEach(commit => {
+        if (commit.branch === 'main') commitsByBranch.main++;
+        else if (commit.branch === 'master') commitsByBranch.master++;
+        else commitsByBranch.other++;
+      });
       
       repoContributions.push({
         name: repo.name,
@@ -432,6 +519,7 @@ async function generateWrapped(username, year, token, env) {
         commits: commits.length,
         stars: repo.stargazers_count,
         language: repo.language,
+        defaultBranch: commits[0]?.branch || 'main',
       });
       
       // Track language usage
@@ -440,6 +528,9 @@ async function generateWrapped(username, year, token, env) {
       }
     }
   }
+  
+  console.log(`[generateWrapped] Total commits found: ${totalCommits}`);
+  console.log(`[generateWrapped] Commits by branch - main: ${commitsByBranch.main}, master: ${commitsByBranch.master}, other: ${commitsByBranch.other}`);
   
   // Sort repos by commits
   repoContributions.sort((a, b) => b.commits - a.commits);
@@ -467,19 +558,23 @@ async function generateWrapped(username, year, token, env) {
     try {
       // Try AI analysis if env.AI is available
       if (env && env.AI) {
+        console.log(`[generateWrapped] Attempting AI analysis of ${allCommits.length} commits`);
         insights = await analyzeCommitsWithAI(allCommits, env);
       }
       
       // Fallback to rule-based analysis if AI fails or unavailable
       if (!insights) {
+        console.log(`[generateWrapped] Using fallback analysis`);
         insights = analyzeCommitMessages(allCommits);
       }
     } catch (error) {
-      console.error('Error generating insights:', error);
+      console.error('[generateWrapped] Error generating insights:', error);
       // Use fallback analysis
       insights = analyzeCommitMessages(allCommits);
     }
   }
+  
+  console.log(`[generateWrapped] Wrapped generation complete`);
   
   return {
     user: {
@@ -501,6 +596,7 @@ async function generateWrapped(username, year, token, env) {
       repositoriesContributed: repoContributions.length,
       topRepositories: repoContributions.slice(0, TOP_REPOS_TO_SHOW),
       topLanguages,
+      commitsByBranch,
     },
     insights,
     generatedAt: new Date().toISOString(),
@@ -535,7 +631,17 @@ async function handleRequest(request, env, ctx) {
     // Get query parameters
     const username = url.searchParams.get('username');
     const year = url.searchParams.get('year') || '2025';
-    const token = url.searchParams.get('token') || null;
+    const tokenFromQuery = url.searchParams.get('token') || null;
+    
+    // Support GitHub token from environment variable (for GitHub Actions)
+    // Priority: query parameter > environment variable
+    const token = tokenFromQuery || env.GITHUB_TOKEN || null;
+    
+    if (token) {
+      console.log('[API] Using GitHub token for authentication');
+    } else {
+      console.log('[API] No GitHub token provided - using unauthenticated requests (rate limited)');
+    }
     
     if (!username) {
       return new Response(
@@ -546,6 +652,8 @@ async function handleRequest(request, env, ctx) {
         }
       );
     }
+    
+    console.log(`[API] Request for username: ${username}, year: ${year}`);
     
     // Demo mode for testing
     if (username.toLowerCase() === 'demo' || username.toLowerCase() === 'demouser') {
@@ -568,15 +676,20 @@ async function handleRequest(request, env, ctx) {
           reviews: 89,
           repositoriesContributed: 15,
           topRepositories: [
-            { name: 'awesome-project', fullName: 'demouser/awesome-project', commits: 234, stars: 1250, language: 'JavaScript' },
-            { name: 'react-dashboard', fullName: 'demouser/react-dashboard', commits: 189, stars: 892, language: 'TypeScript' },
-            { name: 'python-api', fullName: 'demouser/python-api', commits: 156, stars: 445, language: 'Python' },
+            { name: 'awesome-project', fullName: 'demouser/awesome-project', commits: 234, stars: 1250, language: 'JavaScript', defaultBranch: 'main' },
+            { name: 'react-dashboard', fullName: 'demouser/react-dashboard', commits: 189, stars: 892, language: 'TypeScript', defaultBranch: 'main' },
+            { name: 'python-api', fullName: 'demouser/python-api', commits: 156, stars: 445, language: 'Python', defaultBranch: 'main' },
           ],
           topLanguages: [
             { language: 'JavaScript', commits: 312 },
             { language: 'TypeScript', commits: 245 },
             { language: 'Python', commits: 178 },
           ],
+          commitsByBranch: {
+            main: 765,
+            master: 82,
+            other: 0
+          },
         },
         insights: {
           story: "This year, you transformed from a JavaScript enthusiast into a full-stack powerhouse. You tackled ambitious projects, conquered tricky bugs, and shipped features that users loved.",
@@ -629,8 +742,11 @@ async function handleRequest(request, env, ctx) {
     
     if (!response) {
       try {
+        console.log(`[API] Generating wrapped data for ${username}`);
         // Generate wrapped data with AI analysis
         const wrappedData = await generateWrapped(username, year, token, env);
+        
+        console.log(`[API] Successfully generated wrapped data with ${wrappedData.stats.totalCommits} commits`);
         
         // Create response
         response = new Response(JSON.stringify(wrappedData), {
@@ -644,14 +760,20 @@ async function handleRequest(request, env, ctx) {
         // Store in cache
         ctx.waitUntil(cache.put(cacheUrl, response.clone()));
       } catch (error) {
+        console.error(`[API] Error generating wrapped:`, error.message);
         return new Response(
-          JSON.stringify({ error: error.message }),
+          JSON.stringify({ 
+            error: error.message,
+            details: 'Failed to generate GitHub wrapped data. Please check the username and try again.'
+          }),
           { 
             status: 500, 
             headers: { ...corsHeaders, 'Content-Type': 'application/json' }
           }
         );
       }
+    } else {
+      console.log(`[API] Serving cached data for ${username}`);
     }
     
     return response;
