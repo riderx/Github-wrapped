@@ -141,13 +141,13 @@ export default {
 
     const loginWithGitHub = async () => {
       try {
-        const response = await fetch('/api/oauth/login')
+        const response = await fetch('/api/oauth/login', {
+          credentials: 'include'
+        })
         const data = await response.json()
         
         if (data.authUrl) {
-          // Store state in sessionStorage for verification
-          sessionStorage.setItem('oauth_state', data.state)
-          // Redirect to GitHub OAuth
+          // Redirect to GitHub OAuth (state is stored server-side in cookie)
           window.location.href = data.authUrl
         } else {
           error.value = data.error || 'Failed to initiate GitHub login'

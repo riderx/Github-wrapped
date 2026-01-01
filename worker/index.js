@@ -680,6 +680,42 @@ function getSessionToken(request) {
 }
 
 /**
+ * Get OAuth redirect URI
+ */
+function getOAuthRedirectUri(env) {
+  return env.OAUTH_REDIRECT_URI || `${env.APP_URL || 'https://github-wrapped.your-subdomain.workers.dev'}/api/oauth/callback`;
+}
+
+/**
+ * Store state in a cookie for CSRF protection
+ */
+function createStateCookie(state) {
+  const expires = new Date(Date.now() + 10 * 60 * 1000).toUTCString(); // 10 minutes
+  return `oauth_state=${state}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=600; Expires=${expires}`;
+}
+
+/**
+ * Get and validate OAuth state from cookie
+ */
+function validateState(request, providedState) {
+  const cookies = parseCookies(request);
+  const storedState = cookies['oauth_state'];
+  
+  if (!storedState || !providedState) {
+    return false;
+  }
+  
+  return storedState === providedState;
+}
+
+/**
+ * Clear OAuth state cookie
+ */
+function clearStateCookie() {
+  return `oauth_state=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
+}
+
+/**
  * Handle OAuth login initiation
  */
 function handleOAuthLogin(env, corsHeaders) {
@@ -696,7 +732,8 @@ function handleOAuthLogin(env, corsHeaders) {
   }
   
   const state = generateState();
-  const redirectUri = env.OAUTH_REDIRECT_URI || `${env.APP_URL || 'https://github-wrapped.your-subdomain.workers.dev'}/api/oauth/callback`;
+  const redirectUri = getOAuthRedirectUri(env);
+  const stateCookie = createStateCookie(state);
   
   // GitHub OAuth authorization URL
   const authUrl = new URL('https://github.com/login/oauth/authorize');
@@ -715,6 +752,7 @@ function handleOAuthLogin(env, corsHeaders) {
       headers: {
         ...corsHeaders,
         'Content-Type': 'application/json',
+        'Set-Cookie': stateCookie,
       }
     }
   );
@@ -728,6 +766,18 @@ async function handleOAuthCallback(request, env, corsHeaders) {
   const code = url.searchParams.get('code');
   const state = url.searchParams.get('state');
   
+  // Validate state parameter for CSRF protection
+  if (!validateState(request, state)) {
+    const clearState = clearStateCookie();
+    return new Response(
+      JSON.stringify({ error: 'Invalid state parameter. Possible CSRF attack.' }),
+      { 
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json', 'Set-Cookie': clearState }
+      }
+    );
+  }
+  
   if (!code) {
     return new Response(
       JSON.stringify({ error: 'Missing authorization code' }),
@@ -740,14 +790,15 @@ async function handleOAuthCallback(request, env, corsHeaders) {
   
   const clientId = env.GITHUB_CLIENT_ID;
   const clientSecret = env.GITHUB_CLIENT_SECRET;
-  const redirectUri = env.OAUTH_REDIRECT_URI || `${env.APP_URL || 'https://github-wrapped.your-subdomain.workers.dev'}/api/oauth/callback`;
+  const redirectUri = getOAuthRedirectUri(env);
   
   if (!clientId || !clientSecret) {
+    const clearState = clearStateCookie();
     return new Response(
       JSON.stringify({ error: 'OAuth not configured' }),
       { 
         status: 500,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        headers: { ...corsHeaders, 'Content-Type': 'application/json', 'Set-Cookie': clearState }
       }
     );
   }
@@ -772,11 +823,12 @@ async function handleOAuthCallback(request, env, corsHeaders) {
     
     if (tokenData.error) {
       console.error('[OAuth] Error exchanging code:', tokenData);
+      const clearState = clearStateCookie();
       return new Response(
         JSON.stringify({ error: tokenData.error_description || tokenData.error }),
         { 
           status: 400,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          headers: { ...corsHeaders, 'Content-Type': 'application/json', 'Set-Cookie': clearState }
         }
       );
     }
@@ -786,8 +838,9 @@ async function handleOAuthCallback(request, env, corsHeaders) {
     // Get user info to verify token
     const userInfo = await fetchGitHub('https://api.github.com/user', accessToken);
     
-    // Create session cookie with the access token
+    // Create session cookie with the access token and clear state cookie
     const sessionCookie = createSessionCookie(accessToken);
+    const clearState = clearStateCookie();
     
     // Redirect back to the app with success
     const appUrl = env.APP_URL || url.origin;
@@ -795,20 +848,24 @@ async function handleOAuthCallback(request, env, corsHeaders) {
     redirectUrl.searchParams.set('oauth', 'success');
     redirectUrl.searchParams.set('username', userInfo.login);
     
+    // Use Headers object to set multiple Set-Cookie headers
+    const headers = new Headers();
+    headers.set('Location', redirectUrl.toString());
+    headers.append('Set-Cookie', sessionCookie);
+    headers.append('Set-Cookie', clearState);
+    
     return new Response(null, {
       status: 302,
-      headers: {
-        'Location': redirectUrl.toString(),
-        'Set-Cookie': sessionCookie,
-      }
+      headers: headers,
     });
   } catch (error) {
     console.error('[OAuth] Callback error:', error);
+    const clearState = clearStateCookie();
     return new Response(
       JSON.stringify({ error: 'OAuth authentication failed', details: error.message }),
       { 
         status: 500,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        headers: { ...corsHeaders, 'Content-Type': 'application/json', 'Set-Cookie': clearState }
       }
     );
   }
@@ -931,7 +988,7 @@ async function handleRequest(request, env, ctx) {
   // API routes
   if (path === '/api/wrapped') {
     // Get query parameters
-    const username = url.searchParams.get('username');
+    let username = url.searchParams.get('username');
     const year = url.searchParams.get('year') || '2025';
     const tokenFromQuery = url.searchParams.get('token') || null;
     
@@ -941,20 +998,31 @@ async function handleRequest(request, env, ctx) {
     // Priority: query parameter > session token > environment variable
     const token = tokenFromQuery || sessionToken || env.GITHUB_TOKEN || null;
     
-    if (token) {
-      console.log('[API] Using GitHub token for authentication');
-    } else {
-      console.log('[API] No GitHub token provided - using unauthenticated requests (rate limited)');
+    // If no username provided but user is authenticated, use their username
+    if (!username && sessionToken) {
+      try {
+        const userInfo = await fetchGitHub('https://api.github.com/user', sessionToken);
+        username = userInfo.login;
+        console.log(`[API] No username provided, using authenticated user: ${username}`);
+      } catch (error) {
+        console.error('[API] Failed to get authenticated user:', error);
+      }
     }
     
     if (!username) {
       return new Response(
-        JSON.stringify({ error: 'Username is required' }),
+        JSON.stringify({ error: 'Username is required. Please provide a username or sign in.' }),
         { 
           status: 400, 
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         }
       );
+    }
+    
+    if (token) {
+      console.log('[API] Using GitHub token for authentication');
+    } else {
+      console.log('[API] No GitHub token provided - using unauthenticated requests (rate limited)');
     }
     
     console.log(`[API] Request for username: ${username}, year: ${year}`);
