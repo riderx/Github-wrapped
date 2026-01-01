@@ -18,6 +18,36 @@ A beautiful web application that creates a "Spotify Wrapped" style visualization
 - Most active repositories
 - Follower/following stats
 - Beautiful visualizations and stats cards
+- Optional: Detailed commit changes and code diffs for AI analysis
+
+## Enhanced Features
+
+### Detailed Commit Information
+
+The API now supports fetching detailed commit information including file changes and code diffs. This is particularly useful for:
+- AI-powered code analysis
+- Understanding code evolution over time
+- Generating deeper insights about development patterns
+- Training models on coding behaviors
+
+To enable detailed mode, add `includeDetails=true` to your API request:
+```
+/api/wrapped?username=octocat&year=2025&includeDetails=true
+```
+
+**Benefits:**
+- Full commit metadata including author information
+- Line-by-line code changes (additions/deletions)
+- File-level statistics
+- Diff patches for each modified file
+- Aggregated statistics across all commits
+
+**Considerations:**
+- Detailed mode makes additional API calls (one per commit up to 50 commits per repository)
+- Responses will be larger due to included diff data
+- Slightly longer processing time
+- Respects GitHub API rate limits with automatic throttling
+- Works with both authenticated (PAT) and public API requests
 
 ## Quick Start
 
@@ -220,6 +250,7 @@ Fetches GitHub wrapped data for a user.
 - `username` (required): GitHub username or organization
 - `year` (optional): Year to generate wrapped for (default: 2025)
 - `token` (optional): GitHub API token for private repo access
+- `includeDetails` (optional): Set to `true` or `1` to include detailed commit information with file changes and code diffs (default: false)
 
 **Response:**
 ```json
@@ -241,10 +272,46 @@ Fetches GitHub wrapped data for a user.
     "reviews": 30,
     "repositoriesContributed": 10,
     "topRepositories": [...],
-    "topLanguages": [...]
-  }
+    "topLanguages": [...],
+    "totalAdditions": 15420,
+    "totalDeletions": 8932,
+    "totalChanges": 24352
+  },
+  "commits": [
+    {
+      "sha": "abc123...",
+      "message": "Add new feature",
+      "date": "2025-03-15T10:30:00Z",
+      "repo": "owner/repo",
+      "author": {
+        "name": "John Doe",
+        "email": "john@example.com"
+      },
+      "stats": {
+        "additions": 150,
+        "deletions": 45,
+        "total": 195
+      },
+      "files": [
+        {
+          "filename": "src/app.js",
+          "status": "modified",
+          "additions": 100,
+          "deletions": 20,
+          "changes": 120,
+          "patch": "@@ -10,7 +10,8 @@ ..."
+        }
+      ]
+    }
+  ]
 }
 ```
+
+**Notes:**
+- The `totalAdditions`, `totalDeletions`, `totalChanges`, and `commits` fields are only included when `includeDetails=true`
+- Detailed mode fetches full commit information including file changes and diffs, which is useful for AI-powered analysis
+- Detailed mode makes more API requests and may be slower, but provides richer data for downstream processing
+- Rate limiting is automatically handled for both authenticated and unauthenticated requests
 
 ## Technologies Used
 

@@ -79,9 +79,48 @@ async function getUserRepos(username, token) {
 }
 
 /**
- * Get commits for a repository in a specific year with messages
+ * Get detailed information about a specific commit including file changes
  */
-async function getRepoCommits(owner, repo, username, year, token) {
+async function getCommitDetails(owner, repo, sha, token) {
+  try {
+    const commit = await fetchGitHub(
+      `https://api.github.com/repos/${owner}/${repo}/commits/${sha}`,
+      token
+    );
+    
+    return {
+      sha: commit.sha,
+      message: commit.commit.message,
+      date: commit.commit.author.date,
+      author: {
+        name: commit.commit.author.name,
+        email: commit.commit.author.email
+      },
+      stats: {
+        additions: commit.stats?.additions || 0,
+        deletions: commit.stats?.deletions || 0,
+        total: commit.stats?.total || 0
+      },
+      files: commit.files ? commit.files.map(file => ({
+        filename: file.filename,
+        status: file.status,
+        additions: file.additions,
+        deletions: file.deletions,
+        changes: file.changes,
+        patch: file.patch // The actual diff/code changes
+      })) : []
+    };
+  } catch (error) {
+    console.error(`Error fetching commit details for ${sha}:`, error);
+    return null;
+  }
+}
+
+/**
+ * Get commits for a repository in a specific year with messages
+ * If includeDetails is true, fetches full commit details including file changes
+ */
+async function getRepoCommits(owner, repo, username, year, token, includeDetails = false) {
   const since = `${year}-01-01T00:00:00Z`;
   const until = `${year}-12-31T23:59:59Z`;
   
@@ -92,12 +131,37 @@ async function getRepoCommits(owner, repo, username, year, token) {
       token
     );
     
-    // Return commits with message and date
+    // If detailed information is requested, fetch each commit's full details
+    if (includeDetails) {
+      const detailedCommits = [];
+      // Limit to avoid excessive API calls - fetch details for up to 50 commits per repo
+      const commitsToDetail = commits.slice(0, 50);
+      
+      for (const commit of commitsToDetail) {
+        const details = await getCommitDetails(owner, repo, commit.sha, token);
+        if (details) {
+          detailedCommits.push({
+            ...details,
+            repo: `${owner}/${repo}`
+          });
+        }
+        // Small delay to avoid rate limiting
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      
+      return detailedCommits;
+    }
+    
+    // Return basic commits with message and date
     return commits.map(commit => ({
       sha: commit.sha,
       message: commit.commit.message,
       date: commit.commit.author.date,
-      repo: `${owner}/${repo}`
+      repo: `${owner}/${repo}`,
+      author: {
+        name: commit.commit.author.name,
+        email: commit.commit.author.email
+      }
     }));
   } catch (error) {
     console.error(`Error fetching commits for ${owner}/${repo}:`, error);
@@ -394,8 +458,13 @@ function analyzeCommitMessages(allCommits) {
 
 /**
  * Aggregate GitHub statistics for the wrapped
+ * @param {string} username - GitHub username
+ * @param {string} year - Year to analyze
+ * @param {string} token - GitHub API token (optional)
+ * @param {object} env - Cloudflare environment object
+ * @param {boolean} includeDetails - Whether to fetch detailed commit information including file changes
  */
-async function generateWrapped(username, year, token, env) {
+async function generateWrapped(username, year, token, env, includeDetails = false) {
   // Get user info
   const userInfo = await getUserInfo(username, token);
   
@@ -415,16 +484,26 @@ async function generateWrapped(username, year, token, env) {
   // Collect all commits for analysis
   let allCommits = [];
   let totalCommits = 0;
+  let totalAdditions = 0;
+  let totalDeletions = 0;
   let languageStats = {};
   let repoContributions = [];
   
   for (const repo of filteredRepos) {
     // Get commits for this repo
-    const commits = await getRepoCommits(repo.owner.login, repo.name, username, year, token);
+    const commits = await getRepoCommits(repo.owner.login, repo.name, username, year, token, includeDetails);
     
     if (commits.length > 0) {
       totalCommits += commits.length;
       allCommits = allCommits.concat(commits); // Collect all commits for AI analysis
+      
+      // Calculate total code changes if detailed info is available
+      if (includeDetails) {
+        const repoAdditions = commits.reduce((sum, c) => sum + (c.stats?.additions || 0), 0);
+        const repoDeletions = commits.reduce((sum, c) => sum + (c.stats?.deletions || 0), 0);
+        totalAdditions += repoAdditions;
+        totalDeletions += repoDeletions;
+      }
       
       repoContributions.push({
         name: repo.name,
@@ -432,6 +511,8 @@ async function generateWrapped(username, year, token, env) {
         commits: commits.length,
         stars: repo.stargazers_count,
         language: repo.language,
+        additions: includeDetails ? commits.reduce((sum, c) => sum + (c.stats?.additions || 0), 0) : undefined,
+        deletions: includeDetails ? commits.reduce((sum, c) => sum + (c.stats?.deletions || 0), 0) : undefined,
       });
       
       // Track language usage
@@ -501,8 +582,16 @@ async function generateWrapped(username, year, token, env) {
       repositoriesContributed: repoContributions.length,
       topRepositories: repoContributions.slice(0, TOP_REPOS_TO_SHOW),
       topLanguages,
+      // Include code change stats if detailed info was fetched
+      ...(includeDetails ? {
+        totalAdditions,
+        totalDeletions,
+        totalChanges: totalAdditions + totalDeletions,
+      } : {}),
     },
     insights,
+    // Include full commit details if requested (for downstream AI processing)
+    ...(includeDetails ? { commits: allCommits } : {}),
     generatedAt: new Date().toISOString(),
   };
 }
@@ -536,6 +625,7 @@ async function handleRequest(request, env, ctx) {
     const username = url.searchParams.get('username');
     const year = url.searchParams.get('year') || '2025';
     const token = url.searchParams.get('token') || null;
+    const includeDetails = url.searchParams.get('includeDetails') === 'true' || url.searchParams.get('includeDetails') === '1';
     
     if (!username) {
       return new Response(
@@ -577,6 +667,11 @@ async function handleRequest(request, env, ctx) {
             { language: 'TypeScript', commits: 245 },
             { language: 'Python', commits: 178 },
           ],
+          ...(includeDetails ? {
+            totalAdditions: 15420,
+            totalDeletions: 8932,
+            totalChanges: 24352,
+          } : {}),
         },
         insights: {
           story: "This year, you transformed from a JavaScript enthusiast into a full-stack powerhouse. You tackled ambitious projects, conquered tricky bugs, and shipped features that users loved.",
@@ -617,8 +712,8 @@ async function handleRequest(request, env, ctx) {
       });
     }
     
-    // Create cache key
-    const cacheKey = `wrapped:${username}:${year}${token ? ':private' : ''}`;
+    // Create cache key (include includeDetails in cache key)
+    const cacheKey = `wrapped:${username}:${year}${token ? ':private' : ''}${includeDetails ? ':detailed' : ''}`;
     
     // Try to get from cache
     const cache = caches.default;
@@ -630,7 +725,7 @@ async function handleRequest(request, env, ctx) {
     if (!response) {
       try {
         // Generate wrapped data with AI analysis
-        const wrappedData = await generateWrapped(username, year, token, env);
+        const wrappedData = await generateWrapped(username, year, token, env, includeDetails);
         
         // Create response
         response = new Response(JSON.stringify(wrappedData), {
