@@ -508,6 +508,15 @@ async function generateWrapped(username, year, token, env) {
 }
 
 /**
+ * Create a request for index.html (for SPA routing)
+ */
+function createIndexRequest(originalRequest) {
+  const indexUrl = new URL(originalRequest.url);
+  indexUrl.pathname = '/index.html';
+  return new Request(indexUrl, originalRequest);
+}
+
+/**
  * Handle incoming requests
  */
 async function handleRequest(request, env, ctx) {
@@ -648,10 +657,26 @@ async function handleRequest(request, env, ctx) {
     return response;
   }
   
-  // Serve static assets from ASSETS binding (Cloudflare Workers Sites)
+  // Serve static assets from ASSETS binding (Cloudflare Workers Assets)
   try {
-    return await env.ASSETS.fetch(request);
+    // Try to get the asset from ASSETS
+    const response = await env.ASSETS.fetch(request);
+    
+    // If the response is a 404 and not an API route, serve index.html for SPA routing
+    if (response.status === 404 && !path.startsWith('/api')) {
+      return await env.ASSETS.fetch(createIndexRequest(request));
+    }
+    
+    return response;
   } catch (e) {
+    // Fallback: try to serve index.html for SPA routing
+    if (!path.startsWith('/api')) {
+      try {
+        return await env.ASSETS.fetch(createIndexRequest(request));
+      } catch (indexError) {
+        return new Response('Not Found', { status: 404, headers: corsHeaders });
+      }
+    }
     return new Response('Not Found', { status: 404, headers: corsHeaders });
   }
 }

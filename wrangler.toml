@@ -2,9 +2,10 @@ name = "github-wrapped"
 main = "worker/index.js"
 compatibility_date = "2024-01-01"
 
-# Serve static assets from dist folder
-[site]
-bucket = "./dist"
+# Serve static assets from dist folder using Workers Assets
+[assets]
+directory = "./dist"
+binding = "ASSETS"
 
 [build]
 command = "npm run build"

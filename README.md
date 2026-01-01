@@ -40,19 +40,37 @@ npm install
 
 ### Development
 
-Run the frontend (Vue.js):
+#### Option 1: Frontend and Backend Separately (Recommended for development)
+
+Run the frontend (Vue.js) in one terminal:
 ```bash
 npm run dev
 ```
 
 The app will be available at `http://localhost:3000`
 
-Run the backend (Cloudflare Worker) in development mode:
+Run the backend (Cloudflare Worker) in another terminal:
 ```bash
 npm run worker:dev
 ```
 
 The worker API will be available at `http://localhost:8787`
+
+#### Option 2: Test Full Deployment Locally (Recommended for testing)
+
+To test the complete deployment setup locally using Wrangler (this simulates the production environment):
+
+```bash
+npm run dev:local
+```
+
+This command will:
+1. Build the frontend (`npm run build`)
+2. Start Wrangler development server with both the worker and static assets
+
+The complete application (frontend + API) will be available at `http://localhost:8787`
+
+**This is the recommended way to test before deploying to production, as it matches the actual deployment setup.**
 
 ### Usage
 
@@ -76,6 +94,19 @@ To view private repository data, you'll need a GitHub Personal Access Token:
 **Note:** The token is never stored and only used for API requests.
 
 ## Deployment
+
+### Local Testing with Wrangler (Recommended Before Deployment)
+
+Before deploying to production, test your changes locally with Wrangler to ensure everything works correctly:
+
+```bash
+npm run dev:local
+```
+
+This starts a local Cloudflare Workers environment at `http://localhost:8787` that serves both the frontend and API, exactly like production. Test all features including:
+- Static asset serving (visit `http://localhost:8787/`)
+- API endpoints (test with `http://localhost:8787/api/wrapped?username=demo`)
+- SPA routing (navigate to different routes)
 
 ### Automated Deployment with GitHub Actions
 
@@ -113,9 +144,11 @@ The Cloudflare Worker:
 
 ### Manual Deployment
 
-1. Install Wrangler CLI:
+1. Install Wrangler CLI (if not already installed):
 ```bash
 npm install -g wrangler
+# or use the local version
+npx wrangler --version
 ```
 
 2. Login to Cloudflare:
@@ -123,13 +156,40 @@ npm install -g wrangler
 wrangler login
 ```
 
-3. Build and deploy:
+3. Build and deploy using the convenience script:
+```bash
+npm run deploy
+```
+
+Or manually:
 ```bash
 npm run build
 wrangler deploy
 ```
 
 The worker will automatically include the built frontend from the `dist/` folder and serve it alongside the API.
+
+**Troubleshooting 404 Errors:**
+- Ensure the frontend is built before deploying: `npm run build`
+- Check that the `dist/` folder contains `index.html` and `assets/`
+- Verify `wrangler.toml` has the correct `[assets]` configuration
+- Test locally first with `npm run dev:local` to verify everything works
+
+### Configuration Details
+
+The deployment uses Cloudflare Workers Assets (modern approach) configured in `wrangler.toml`:
+
+```toml
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+```
+
+This configuration:
+- Serves all static files from the `dist/` directory
+- Provides an `ASSETS` binding to the worker for programmatic access
+- Supports SPA routing (all non-API routes serve `index.html`)
+- Includes automatic asset optimization and caching
 
 ## Project Structure
 
