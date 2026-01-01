@@ -7,6 +7,14 @@
           <h1 class="form-title">Your GitHub Year</h1>
           <p class="form-subtitle">Enter a username to reveal their story</p>
           
+          <div class="token-notice">
+            <span class="notice-icon">🔑</span>
+            <p class="notice-text">
+              <strong>API Token Required:</strong> To get accurate and complete commit data, 
+              please provide your GitHub token in Advanced Options below.
+            </p>
+          </div>
+          
           <form @submit.prevent="fetchWrapped" class="form">
             <div class="form-group">
               <input
@@ -21,7 +29,7 @@
 
             <div class="advanced-toggle">
               <button type="button" @click="showAdvanced = !showAdvanced" class="toggle-btn">
-                {{ showAdvanced ? '−' : '+' }} Options
+                {{ showAdvanced ? '−' : '+' }} Advanced Options (Token Required)
               </button>
             </div>
 
@@ -39,16 +47,23 @@
                 </div>
 
                 <div class="form-group">
-                  <label for="token">API Token</label>
+                  <label for="token">API Token (Required) *</label>
                   <input
                     id="token"
                     v-model="apiToken"
                     type="password"
-                    placeholder="Optional"
+                    placeholder="ghp_xxxxx..."
                     class="select-input"
                   />
                 </div>
               </div>
+              <p class="token-help">
+                Get your token from 
+                <a href="https://github.com/settings/tokens" target="_blank" rel="noopener">
+                  GitHub Settings
+                </a>
+                (needs 'repo' scope)
+              </p>
             </div>
 
             <button type="submit" class="submit-btn" :disabled="!username.trim()">
@@ -174,6 +189,36 @@ export default {
   text-align: center;
 }
 
+.token-notice {
+  background: linear-gradient(135deg, rgba(29, 185, 84, 0.1), rgba(29, 185, 84, 0.05));
+  border: 2px solid rgba(29, 185, 84, 0.3);
+  border-radius: 12px;
+  padding: var(--space-lg);
+  margin: var(--space-xl) 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  text-align: left;
+}
+
+.notice-icon {
+  font-size: 2rem;
+  flex-shrink: 0;
+}
+
+.notice-text {
+  font-size: var(--font-body);
+  color: var(--text-primary);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.notice-text strong {
+  color: var(--accent-primary);
+  display: block;
+  margin-bottom: var(--space-xs);
+}
+
 .form-title {
   font-size: var(--font-hero);
   font-weight: 700;
@@ -266,6 +311,22 @@ export default {
 
 .advanced-options {
   margin-top: var(--space-lg);
+}
+
+.token-help {
+  margin-top: var(--space-md);
+  font-size: var(--font-caption);
+  color: var(--text-secondary);
+  text-align: left;
+}
+
+.token-help a {
+  color: var(--accent-primary);
+  text-decoration: none;
+}
+
+.token-help a:hover {
+  text-decoration: underline;
 }
 
 .form-row {

@@ -13,13 +13,11 @@ const corsHeaders = {
 // Cache TTL: 1 hour
 const CACHE_TTL = 3600;
 
-// API limits to avoid rate limiting
-const MAX_REPO_PAGES = 10; // Maximum number of pages to fetch (100 repos per page)
-const MAX_REPOS_TO_CHECK = 20; // Maximum number of repos to check for commits
+// Display limits
 const TOP_REPOS_TO_SHOW = 5; // Number of top repositories to display
 
 /**
- * Fetch GitHub API with authentication
+ * Fetch GitHub REST API with authentication
  */
 async function fetchGitHub(url, token = null) {
   const headers = {
@@ -47,78 +45,249 @@ async function fetchGitHub(url, token = null) {
 }
 
 /**
- * Get user information
+ * Fetch GitHub GraphQL API with authentication
  */
-async function getUserInfo(username, token) {
-  return fetchGitHub(`https://api.github.com/users/${username}`, token);
-}
-
-/**
- * Get user's repositories
- */
-async function getUserRepos(username, token) {
-  const repos = [];
-  let page = 1;
-  let hasMore = true;
-  
-  while (hasMore && page <= MAX_REPO_PAGES) {
-    const data = await fetchGitHub(
-      `https://api.github.com/users/${username}/repos?per_page=100&page=${page}&sort=updated`,
-      token
-    );
-    
-    if (data.length === 0) {
-      hasMore = false;
-    } else {
-      repos.push(...data);
-      page++;
-    }
+async function fetchGitHubGraphQL(query, variables, token) {
+  if (!token) {
+    throw new Error('GitHub API token is required for comprehensive data access. Please provide a token to get accurate commit and code change statistics.');
   }
   
-  return repos;
+  const headers = {
+    'User-Agent': 'GitHub-Wrapped',
+    'Authorization': `Bearer ${token}`,
+    'Content-Type': 'application/json',
+  };
+  
+  const response = await fetch('https://api.github.com/graphql', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ query, variables }),
+  });
+  
+  if (!response.ok) {
+    throw new Error(`GitHub GraphQL API error: ${response.status} ${response.statusText}`);
+  }
+  
+  const result = await response.json();
+  
+  if (result.errors) {
+    throw new Error(`GraphQL errors: ${result.errors.map(e => e.message).join(', ')}`);
+  }
+  
+  return result.data;
 }
 
 /**
- * Get commits for a repository in a specific year with messages
+ * Get user information using GraphQL
  */
-async function getRepoCommits(owner, repo, username, year, token) {
+async function getUserInfoGraphQL(username, token) {
+  const query = `
+    query($login: String!) {
+      user(login: $login) {
+        login
+        name
+        avatarUrl
+        bio
+        location
+        repositories {
+          totalCount
+        }
+        followers {
+          totalCount
+        }
+        following {
+          totalCount
+        }
+      }
+    }
+  `;
+  
+  const data = await fetchGitHubGraphQL(query, { login: username }, token);
+  const user = data.user;
+  
+  if (!user) {
+    throw new Error(`User ${username} not found`);
+  }
+  
+  return {
+    login: user.login,
+    name: user.name,
+    avatar_url: user.avatarUrl,
+    bio: user.bio,
+    location: user.location,
+    public_repos: user.repositories.totalCount,
+    followers: user.followers.totalCount,
+    following: user.following.totalCount,
+  };
+}
+
+/**
+ * Get comprehensive commit data for a user using GraphQL
+ */
+async function getUserCommitsGraphQL(username, year, token) {
   const since = `${year}-01-01T00:00:00Z`;
   const until = `${year}-12-31T23:59:59Z`;
   
+  const query = `
+    query($login: String!, $from: GitTimestamp!, $to: GitTimestamp!, $cursor: String) {
+      user(login: $login) {
+        contributionsCollection(from: $from, to: $to) {
+          totalCommitContributions
+          totalPullRequestContributions
+          totalPullRequestReviewContributions
+          totalIssueContributions
+          totalRepositoryContributions
+          commitContributionsByRepository(maxRepositories: 100) {
+            repository {
+              name
+              owner {
+                login
+              }
+              nameWithOwner
+              primaryLanguage {
+                name
+              }
+              stargazerCount
+            }
+            contributions(first: 100, after: $cursor) {
+              totalCount
+              pageInfo {
+                hasNextPage
+                endCursor
+              }
+              nodes {
+                commitCount
+                occurredAt
+              }
+            }
+          }
+        }
+      }
+    }
+  `;
+  
+  const data = await fetchGitHubGraphQL(query, { 
+    login: username, 
+    from: since, 
+    to: until,
+    cursor: null 
+  }, token);
+  
+  const contributions = data.user.contributionsCollection;
+  
+  return {
+    totalCommits: contributions.totalCommitContributions,
+    totalPullRequests: contributions.totalPullRequestContributions,
+    totalReviews: contributions.totalPullRequestReviewContributions,
+    totalIssues: contributions.totalIssueContributions,
+    totalRepos: contributions.totalRepositoryContributions,
+    repositories: contributions.commitContributionsByRepository,
+  };
+}
+
+/**
+ * Get detailed commit information for repositories
+ */
+async function getDetailedCommitsForRepo(owner, repo, username, year, token, cursor = null) {
+  const since = `${year}-01-01T00:00:00Z`;
+  const until = `${year}-12-31T23:59:59Z`;
+  
+  const query = `
+    query($owner: String!, $repo: String!, $since: GitTimestamp!, $until: GitTimestamp!, $cursor: String) {
+      repository(owner: $owner, name: $repo) {
+        defaultBranchRef {
+          target {
+            ... on Commit {
+              history(first: 100, after: $cursor, since: $since, until: $until) {
+                totalCount
+                pageInfo {
+                  hasNextPage
+                  endCursor
+                }
+                nodes {
+                  oid
+                  message
+                  committedDate
+                  additions
+                  deletions
+                  changedFilesIfAvailable
+                  author {
+                    user {
+                      login
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  `;
+  
   try {
-    // Fetch commits with details
-    const commits = await fetchGitHub(
-      `https://api.github.com/repos/${owner}/${repo}/commits?author=${username}&since=${since}&until=${until}&per_page=100`,
-      token
-    );
+    const data = await fetchGitHubGraphQL(query, { 
+      owner, 
+      repo, 
+      since, 
+      until, 
+      cursor 
+    }, token);
     
-    // Return commits with message and date
-    return commits.map(commit => ({
-      sha: commit.sha,
-      message: commit.commit.message,
-      date: commit.commit.author.date,
-      repo: `${owner}/${repo}`
-    }));
+    if (!data.repository || !data.repository.defaultBranchRef) {
+      return { commits: [], hasNextPage: false, endCursor: null };
+    }
+    
+    const history = data.repository.defaultBranchRef.target.history;
+    
+    // Filter commits by author username
+    const filteredCommits = history.nodes
+      .filter(commit => {
+        return commit.author && 
+               commit.author.user && 
+               commit.author.user.login.toLowerCase() === username.toLowerCase();
+      })
+      .map(commit => ({
+        sha: commit.oid,
+        message: commit.message,
+        date: commit.committedDate,
+        additions: commit.additions,
+        deletions: commit.deletions,
+        changedFiles: commit.changedFilesIfAvailable,
+        repo: `${owner}/${repo}`
+      }));
+    
+    return {
+      commits: filteredCommits,
+      hasNextPage: history.pageInfo.hasNextPage,
+      endCursor: history.pageInfo.endCursor,
+      totalCount: history.totalCount,
+    };
   } catch (error) {
-    console.error(`Error fetching commits for ${owner}/${repo}:`, error);
-    return [];
+    console.error(`Error fetching detailed commits for ${owner}/${repo}:`, error);
+    return { commits: [], hasNextPage: false, endCursor: null, totalCount: 0 };
   }
 }
 
 /**
- * Get user's events (for activity tracking)
+ * Get all commits for a repository with pagination
  */
-async function getUserEvents(username, token) {
-  try {
-    const events = await fetchGitHub(
-      `https://api.github.com/users/${username}/events?per_page=100`,
-      token
-    );
-    return events;
-  } catch (error) {
-    console.error(`Error fetching events for ${username}:`, error);
-    return [];
+async function getAllCommitsForRepo(owner, repo, username, year, token) {
+  let allCommits = [];
+  let cursor = null;
+  let hasNextPage = true;
+  let pageCount = 0;
+  const maxPages = 50; // Limit to prevent excessive API calls (50 pages * 100 = 5000 commits max per repo)
+  
+  while (hasNextPage && pageCount < maxPages) {
+    const result = await getDetailedCommitsForRepo(owner, repo, username, year, token, cursor);
+    allCommits = allCommits.concat(result.commits);
+    hasNextPage = result.hasNextPage;
+    cursor = result.endCursor;
+    pageCount++;
   }
+  
+  return allCommits;
 }
 
 /**
@@ -393,50 +562,66 @@ function analyzeCommitMessages(allCommits) {
 }
 
 /**
- * Aggregate GitHub statistics for the wrapped
+ * Aggregate GitHub statistics for the wrapped using GraphQL
  */
 async function generateWrapped(username, year, token, env) {
-  // Get user info
-  const userInfo = await getUserInfo(username, token);
+  // Require token for comprehensive data
+  if (!token) {
+    throw new Error('GitHub API token is required for comprehensive data access. Please provide a token in the Advanced Options to get accurate commit and code change statistics.');
+  }
   
-  // Get repositories (limit to recent ones)
-  const repos = await getUserRepos(username, token);
+  // Get user info using GraphQL
+  const userInfo = await getUserInfoGraphQL(username, token);
   
-  // Filter repos updated in the target year and limit to avoid rate limits
-  const targetYear = parseInt(year);
-  const filteredRepos = repos
-    .filter(repo => {
-      const updatedYear = new Date(repo.updated_at).getFullYear();
-      return updatedYear >= targetYear - 1; // Include previous year to catch early commits
-    })
-    .sort((a, b) => b.stargazers_count - a.stargazers_count)
-    .slice(0, MAX_REPOS_TO_CHECK);
+  // Get comprehensive commit data using GraphQL
+  const contributionData = await getUserCommitsGraphQL(username, year, token);
   
-  // Collect all commits for analysis
+  // Extract repository information
+  const repositories = contributionData.repositories;
+  
+  // Collect detailed commit information with code changes
   let allCommits = [];
-  let totalCommits = 0;
+  let totalAdditions = 0;
+  let totalDeletions = 0;
+  let totalFilesChanged = 0;
   let languageStats = {};
   let repoContributions = [];
   
-  for (const repo of filteredRepos) {
-    // Get commits for this repo
-    const commits = await getRepoCommits(repo.owner.login, repo.name, username, year, token);
+  // Process each repository to get detailed commit data
+  for (const repoData of repositories) {
+    const repo = repoData.repository;
+    const owner = repo.owner.login;
+    const repoName = repo.name;
+    
+    // Get all commits for this repository with pagination
+    const commits = await getAllCommitsForRepo(owner, repoName, username, year, token);
     
     if (commits.length > 0) {
-      totalCommits += commits.length;
-      allCommits = allCommits.concat(commits); // Collect all commits for AI analysis
+      allCommits = allCommits.concat(commits);
+      
+      // Calculate code change statistics
+      const repoAdditions = commits.reduce((sum, c) => sum + (c.additions || 0), 0);
+      const repoDeletions = commits.reduce((sum, c) => sum + (c.deletions || 0), 0);
+      const repoFilesChanged = commits.reduce((sum, c) => sum + (c.changedFiles || 0), 0);
+      
+      totalAdditions += repoAdditions;
+      totalDeletions += repoDeletions;
+      totalFilesChanged += repoFilesChanged;
       
       repoContributions.push({
-        name: repo.name,
-        fullName: repo.full_name,
+        name: repoName,
+        fullName: repo.nameWithOwner,
         commits: commits.length,
-        stars: repo.stargazers_count,
-        language: repo.language,
+        stars: repo.stargazerCount,
+        language: repo.primaryLanguage ? repo.primaryLanguage.name : null,
+        additions: repoAdditions,
+        deletions: repoDeletions,
+        filesChanged: repoFilesChanged,
       });
       
-      // Track language usage
-      if (repo.language) {
-        languageStats[repo.language] = (languageStats[repo.language] || 0) + commits.length;
+      // Track language usage by commits
+      if (repo.primaryLanguage) {
+        languageStats[repo.primaryLanguage.name] = (languageStats[repo.primaryLanguage.name] || 0) + commits.length;
       }
     }
   }
@@ -449,17 +634,6 @@ async function generateWrapped(username, year, token, env) {
     .sort(([, a], [, b]) => b - a)
     .slice(0, 5)
     .map(([language, commits]) => ({ language, commits }));
-  
-  // Get recent events for additional stats
-  const events = await getUserEvents(username, token);
-  const yearEvents = events.filter(event => {
-    const eventDate = new Date(event.created_at);
-    return eventDate.getFullYear() === parseInt(year);
-  });
-  
-  const pullRequests = yearEvents.filter(e => e.type === 'PullRequestEvent').length;
-  const issues = yearEvents.filter(e => e.type === 'IssuesEvent').length;
-  const reviews = yearEvents.filter(e => e.type === 'PullRequestReviewEvent').length;
   
   // Generate AI insights from commits
   let insights = null;
@@ -494,13 +668,19 @@ async function generateWrapped(username, year, token, env) {
     },
     year: parseInt(year),
     stats: {
-      totalCommits,
-      pullRequests,
-      issues,
-      reviews,
-      repositoriesContributed: repoContributions.length,
+      totalCommits: contributionData.totalCommits,
+      pullRequests: contributionData.totalPullRequests,
+      issues: contributionData.totalIssues,
+      reviews: contributionData.totalReviews,
+      repositoriesContributed: contributionData.totalRepos,
       topRepositories: repoContributions.slice(0, TOP_REPOS_TO_SHOW),
       topLanguages,
+      codeChanges: {
+        additions: totalAdditions,
+        deletions: totalDeletions,
+        filesChanged: totalFilesChanged,
+        linesChanged: totalAdditions + totalDeletions,
+      },
     },
     insights,
     generatedAt: new Date().toISOString(),
@@ -568,15 +748,21 @@ async function handleRequest(request, env, ctx) {
           reviews: 89,
           repositoriesContributed: 15,
           topRepositories: [
-            { name: 'awesome-project', fullName: 'demouser/awesome-project', commits: 234, stars: 1250, language: 'JavaScript' },
-            { name: 'react-dashboard', fullName: 'demouser/react-dashboard', commits: 189, stars: 892, language: 'TypeScript' },
-            { name: 'python-api', fullName: 'demouser/python-api', commits: 156, stars: 445, language: 'Python' },
+            { name: 'awesome-project', fullName: 'demouser/awesome-project', commits: 234, stars: 1250, language: 'JavaScript', additions: 12453, deletions: 3421, filesChanged: 567 },
+            { name: 'react-dashboard', fullName: 'demouser/react-dashboard', commits: 189, stars: 892, language: 'TypeScript', additions: 9876, deletions: 2345, filesChanged: 423 },
+            { name: 'python-api', fullName: 'demouser/python-api', commits: 156, stars: 445, language: 'Python', additions: 7654, deletions: 1987, filesChanged: 312 },
           ],
           topLanguages: [
             { language: 'JavaScript', commits: 312 },
             { language: 'TypeScript', commits: 245 },
             { language: 'Python', commits: 178 },
           ],
+          codeChanges: {
+            additions: 45678,
+            deletions: 12345,
+            filesChanged: 1823,
+            linesChanged: 58023,
+          },
         },
         insights: {
           story: "This year, you transformed from a JavaScript enthusiast into a full-stack powerhouse. You tackled ambitious projects, conquered tricky bugs, and shipped features that users loved.",

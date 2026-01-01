@@ -52,6 +52,31 @@
       </div>
     </section>
 
+    <!-- Code Changes Section -->
+    <section v-if="data.stats.codeChanges" class="code-changes-section fade-in">
+      <div class="card-content">
+        <h2 class="section-title">Code Impact</h2>
+        <div class="code-stats-grid">
+          <div class="code-stat">
+            <div class="code-stat-number additions">+{{ formatNumber(data.stats.codeChanges.additions) }}</div>
+            <div class="code-stat-label">Lines Added</div>
+          </div>
+          <div class="code-stat">
+            <div class="code-stat-number deletions">-{{ formatNumber(data.stats.codeChanges.deletions) }}</div>
+            <div class="code-stat-label">Lines Removed</div>
+          </div>
+          <div class="code-stat">
+            <div class="code-stat-number total">{{ formatNumber(data.stats.codeChanges.linesChanged) }}</div>
+            <div class="code-stat-label">Total Changes</div>
+          </div>
+          <div class="code-stat">
+            <div class="code-stat-number files">{{ formatNumber(data.stats.codeChanges.filesChanged) }}</div>
+            <div class="code-stat-label">Files Modified</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- AI Insights - Struggles -->
     <section v-if="data.insights && data.insights.biggestStruggles && data.insights.biggestStruggles.length > 0" class="insight-card struggles-card fade-in">
       <div class="card-content">
@@ -333,6 +358,58 @@ export default {
 }
 
 .stat-label {
+  font-size: var(--font-caption);
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+/* Code Changes Section */
+.code-changes-section {
+  margin-bottom: var(--space-xl);
+  padding: var(--space-xl);
+  background: linear-gradient(135deg, rgba(29, 185, 84, 0.05), rgba(29, 185, 84, 0.02));
+  border-radius: 16px;
+}
+
+.code-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--space-lg);
+  margin-top: var(--space-lg);
+}
+
+.code-stat {
+  text-align: center;
+  padding: var(--space-lg);
+  background: var(--bg-secondary);
+  border-radius: 12px;
+}
+
+.code-stat-number {
+  font-size: var(--font-title);
+  font-weight: 700;
+  line-height: 1;
+  margin-bottom: var(--space-sm);
+}
+
+.code-stat-number.additions {
+  color: #28a745;
+}
+
+.code-stat-number.deletions {
+  color: #d73a49;
+}
+
+.code-stat-number.total {
+  color: var(--accent-primary);
+}
+
+.code-stat-number.files {
+  color: #0366d6;
+}
+
+.code-stat-label {
   font-size: var(--font-caption);
   color: var(--text-secondary);
   text-transform: uppercase;
