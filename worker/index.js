@@ -29,6 +29,12 @@ async function fetchGitHub(url, token = null) {
   const response = await fetch(url, { headers });
   
   if (!response.ok) {
+    if (response.status === 403) {
+      const rateLimitRemaining = response.headers.get('X-RateLimit-Remaining');
+      if (rateLimitRemaining === '0') {
+        throw new Error('GitHub API rate limit exceeded. Please provide an API token or try again later.');
+      }
+    }
     throw new Error(`GitHub API error: ${response.status} ${response.statusText}`);
   }
   
@@ -75,8 +81,9 @@ async function getRepoCommits(owner, repo, username, year, token) {
   const until = `${year}-12-31T23:59:59Z`;
   
   try {
+    // Only check first page to reduce API calls
     const commits = await fetchGitHub(
-      `https://api.github.com/repos/${owner}/${repo}/commits?author=${username}&since=${since}&until=${until}&per_page=100`,
+      `https://api.github.com/repos/${owner}/${repo}/commits?author=${username}&since=${since}&until=${until}&per_page=30`,
       token
     );
     return commits;
@@ -109,15 +116,25 @@ async function generateWrapped(username, year, token) {
   // Get user info
   const userInfo = await getUserInfo(username, token);
   
-  // Get repositories
+  // Get repositories (limit to recent ones)
   const repos = await getUserRepos(username, token);
+  
+  // Filter repos updated in the target year and limit to top 20 by stars
+  const targetYear = parseInt(year);
+  const filteredRepos = repos
+    .filter(repo => {
+      const updatedYear = new Date(repo.updated_at).getFullYear();
+      return updatedYear >= targetYear - 1; // Include previous year to catch early commits
+    })
+    .sort((a, b) => b.stargazers_count - a.stargazers_count)
+    .slice(0, 20); // Limit to 20 repos to avoid rate limits
   
   // Filter repos and get commits for the specified year
   let totalCommits = 0;
   let languageStats = {};
   let repoContributions = [];
   
-  for (const repo of repos) {
+  for (const repo of filteredRepos) {
     // Get commits for this repo
     const commits = await getRepoCommits(repo.owner.login, repo.name, username, year, token);
     
