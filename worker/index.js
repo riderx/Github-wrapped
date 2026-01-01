@@ -88,7 +88,7 @@ async function getUserRepos(username, token) {
 }
 
 /**
- * Get default branch for a repository
+ * Get default branch for a repository with fallback strategy
  */
 async function getDefaultBranch(owner, repo, token) {
   try {
@@ -98,8 +98,26 @@ async function getDefaultBranch(owner, repo, token) {
     );
     return repoData.default_branch || 'main';
   } catch (error) {
-    console.error(`[getDefaultBranch] Error fetching default branch for ${owner}/${repo}:`, error);
-    // Fallback to common defaults
+    console.error(`[getDefaultBranch] Error fetching default branch for ${owner}/${repo}:`, error.message);
+    
+    // Try to check for common default branches
+    const commonBranches = ['main', 'master'];
+    for (const branch of commonBranches) {
+      try {
+        await fetchGitHub(
+          `https://api.github.com/repos/${owner}/${repo}/branches/${branch}`,
+          token
+        );
+        console.log(`[getDefaultBranch] Found branch ${branch} for ${owner}/${repo}`);
+        return branch;
+      } catch (branchError) {
+        // Branch doesn't exist, try next
+        continue;
+      }
+    }
+    
+    // Final fallback to main if all else fails
+    console.log(`[getDefaultBranch] Using fallback 'main' for ${owner}/${repo}`);
     return 'main';
   }
 }
@@ -107,6 +125,7 @@ async function getDefaultBranch(owner, repo, token) {
 /**
  * Get commits for a repository in a specific year with messages and changes
  * Only retrieves commits from the default branch (main/master)
+ * Implements pagination to handle repositories with many commits
  */
 async function getRepoCommits(owner, repo, username, year, token) {
   const since = `${year}-01-01T00:00:00Z`;
@@ -117,16 +136,35 @@ async function getRepoCommits(owner, repo, username, year, token) {
     const defaultBranch = await getDefaultBranch(owner, repo, token);
     console.log(`[getRepoCommits] Fetching commits from ${owner}/${repo} on branch ${defaultBranch}`);
     
-    // Fetch commits from the default branch only
-    const commits = await fetchGitHub(
-      `https://api.github.com/repos/${owner}/${repo}/commits?author=${username}&since=${since}&until=${until}&per_page=100&sha=${defaultBranch}`,
-      token
-    );
+    // Fetch commits from the default branch only with pagination
+    let allCommits = [];
+    let page = 1;
+    const maxPages = 5; // Limit to 500 commits per repo (5 pages * 100 per page)
+    let hasMore = true;
     
-    console.log(`[getRepoCommits] Found ${commits.length} commits in ${owner}/${repo}`);
+    while (hasMore && page <= maxPages) {
+      const commits = await fetchGitHub(
+        `https://api.github.com/repos/${owner}/${repo}/commits?author=${username}&since=${since}&until=${until}&per_page=100&page=${page}&sha=${defaultBranch}`,
+        token
+      );
+      
+      if (commits.length === 0) {
+        hasMore = false;
+      } else {
+        allCommits.push(...commits);
+        page++;
+        
+        // If we got fewer than 100, we've reached the end
+        if (commits.length < 100) {
+          hasMore = false;
+        }
+      }
+    }
+    
+    console.log(`[getRepoCommits] Found ${allCommits.length} commits in ${owner}/${repo}`);
     
     // Return commits with message, date, and stats
-    return commits.map(commit => ({
+    return allCommits.map(commit => ({
       sha: commit.sha,
       message: commit.commit.message,
       date: commit.commit.author.date,
