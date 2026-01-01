@@ -77,7 +77,34 @@ To view private repository data, you'll need a GitHub Personal Access Token:
 
 ## Deployment
 
-### Deploy to Cloudflare Workers
+### Automated Deployment with GitHub Actions
+
+This project includes automated deployment via GitHub Actions. Every push to the `main` branch automatically deploys:
+- **Frontend** to Cloudflare Pages
+- **Worker** to Cloudflare Workers
+
+#### Setup GitHub Actions Deployment
+
+1. **Get your Cloudflare credentials:**
+   - Go to [Cloudflare Dashboard](https://dash.cloudflare.com/)
+   - Navigate to "My Profile" → "API Tokens"
+   - Create a token with "Edit Cloudflare Workers" and "Edit Cloudflare Pages" permissions
+   - Note your Account ID (found in Workers & Pages overview)
+
+2. **Add secrets to your GitHub repository:**
+   - Go to your GitHub repository → Settings → Secrets and variables → Actions
+   - Add the following secrets:
+     - `CLOUDFLARE_API_TOKEN`: Your Cloudflare API token
+     - `CLOUDFLARE_ACCOUNT_ID`: Your Cloudflare account ID
+
+3. **Deploy:**
+   - Push to `main` branch or manually trigger the workflow
+   - The workflow will automatically build and deploy both frontend and worker
+   - Check the Actions tab in GitHub for deployment status
+
+### Manual Deployment
+
+#### Deploy Worker to Cloudflare Workers
 
 1. Install Wrangler CLI:
 ```bash
@@ -96,7 +123,7 @@ npm run worker:deploy
 
 4. Update the API endpoint in your frontend to use the deployed worker URL
 
-### Deploy Frontend
+#### Deploy Frontend
 
 The frontend can be deployed to any static hosting service:
 - **Cloudflare Pages**: Connect your GitHub repo and deploy automatically
