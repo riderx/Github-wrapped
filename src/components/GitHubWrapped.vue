@@ -247,17 +247,23 @@
       </div>
     </section>
 
-    <!-- Quotable Commits -->
-    <section v-if="insights?.quotableCommits?.length" class="section quotes-section fade-in">
+    <!-- Notable Contributions -->
+    <section v-if="notableContributionsList?.length" class="section contributions-section fade-in">
       <div class="section-content">
         <h2 class="section-title">
-          <span class="section-icon">💬</span>
-          Quotable Commits
+          <span class="section-icon">🏅</span>
+          Notable Contributions
         </h2>
-        <div class="quotes-list">
-          <blockquote v-for="(quote, index) in insights.quotableCommits" :key="index" class="commit-quote">
-            "{{ quote }}"
-          </blockquote>
+        <div class="contributions-list">
+          <div v-for="(contribution, index) in notableContributionsList" :key="index" class="contribution-card">
+            <div class="contribution-summary">{{ contribution.summary }}</div>
+            <div class="contribution-meta">
+              <span class="contribution-repo">{{ contribution.repo }}</span>
+              <a :href="getCommitUrl(contribution)" target="_blank" rel="noopener noreferrer" class="contribution-link">
+                {{ formatSha(contribution.sha) }}
+              </a>
+            </div>
+          </div>
         </div>
       </div>
     </section>
@@ -356,6 +362,25 @@ export default {
       return []
     })
 
+    // Handle notable contributions
+    const notableContributionsList = computed(() => {
+      const i = insights.value
+      if (Array.isArray(i.notableContributions)) return i.notableContributions
+      return []
+    })
+
+    // Get GitHub commit URL
+    const getCommitUrl = (contribution) => {
+      if (!contribution.sha || !contribution.repo) return '#'
+      return `https://github.com/${contribution.repo}/commit/${contribution.sha}`
+    }
+
+    // Format SHA for display (first 7 characters)
+    const formatSha = (sha) => {
+      if (!sha) return ''
+      return sha.substring(0, 7)
+    }
+
     const formatNumber = (num) => {
       return (num || 0).toLocaleString()
     }
@@ -413,6 +438,9 @@ export default {
       proudMomentsList,
       topicsList,
       funFactsList,
+      notableContributionsList,
+      getCommitUrl,
+      formatSha,
       formatNumber,
       formatParagraphs,
       getLanguageWidth,
@@ -872,23 +900,53 @@ export default {
   margin: 0;
 }
 
-/* Quotes */
-.quotes-list {
+/* Notable Contributions */
+.contributions-list {
   display: flex;
   flex-direction: column;
   gap: var(--space-lg);
 }
 
-.commit-quote {
-  font-size: var(--font-body-lg);
-  font-style: italic;
-  color: var(--text-secondary);
+.contribution-card {
   padding: var(--space-lg);
   background: var(--bg-secondary);
   border-radius: 12px;
   border-left: 4px solid var(--accent-primary);
-  margin: 0;
+}
+
+.contribution-summary {
+  font-size: var(--font-body-lg);
+  color: var(--text-secondary);
   line-height: 1.6;
+  margin-bottom: var(--space-md);
+}
+
+.contribution-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  font-size: var(--font-caption);
+  color: var(--text-tertiary, var(--text-secondary));
+}
+
+.contribution-repo {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.contribution-link {
+  font-family: monospace;
+  padding: 2px 8px;
+  background: var(--bg-primary);
+  border-radius: 4px;
+  color: var(--accent-primary);
+  text-decoration: none;
+  transition: all 0.2s ease;
+}
+
+.contribution-link:hover {
+  background: var(--accent-primary);
+  color: var(--bg-primary);
 }
 
 /* Outlook */
