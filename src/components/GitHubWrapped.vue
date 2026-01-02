@@ -279,25 +279,7 @@
         </div>
       </div>
 
-      <!-- Slide 11: Quotes -->
-      <div class="slide slide-quotes" v-if="insights?.quotableCommits?.length">
-        <h2 class="slide-title">💬 Quotable Commits</h2>
-        <p class="slide-subtitle">Words for the ages</p>
-
-        <div class="quotes-list">
-          <blockquote
-            v-for="(quote, index) in insights.quotableCommits.slice(0, 3)"
-            :key="index"
-            class="quote-card"
-          >
-            <span class="quote-mark">"</span>
-            {{ quote }}
-            <span class="quote-mark">"</span>
-          </blockquote>
-        </div>
-      </div>
-
-      <!-- Slide 12: Month by Month -->
+      <!-- Slide 11: Month by Month -->
       <div class="slide slide-monthly" v-if="insights?.monthByMonth">
         <h2 class="slide-title">📅 Month by Month</h2>
         <p class="slide-subtitle" v-if="insights.monthByMonth.narrative">
@@ -391,7 +373,6 @@ export default {
       if (insights.value.workStyle) slides.push('style')
       if (funFactsList.value?.length) slides.push('funfacts')
       if (topicsList.value?.length || insights.value.technicalEvolution) slides.push('topics')
-      if (insights.value.quotableCommits?.length) slides.push('quotes')
       if (insights.value.monthByMonth) slides.push('monthly')
       if (insights.value.yearAheadOutlook) slides.push('future')
       slides.push('closing')
@@ -1277,32 +1258,6 @@ export default {
   color: var(--text-secondary);
   font-size: 0.875rem;
   margin-bottom: 8px;
-}
-
-/* ==================== QUOTES SLIDE ==================== */
-.quotes-list {
-  width: 100%;
-  max-width: 600px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.quote-card {
-  background: var(--bg-secondary);
-  border-radius: 20px;
-  padding: 24px;
-  font-size: 1.125rem;
-  font-style: italic;
-  color: var(--text-secondary);
-  line-height: 1.6;
-  border-left: 4px solid var(--accent-primary);
-  margin: 0;
-}
-
-.quote-mark {
-  color: var(--accent-primary);
-  font-size: 1.5rem;
 }
 
 /* ==================== MONTHLY SLIDE ==================== */
