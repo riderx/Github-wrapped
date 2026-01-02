@@ -100,6 +100,51 @@ async function getUserInfo(username, token) {
 }
 
 /**
+ * Fetch commit details with file changes for richer context
+ * Returns file stats (additions, deletions, files changed) for a commit
+ */
+async function fetchCommitDetails(repo, sha, token) {
+  try {
+    const data = await fetchGitHub(`https://api.github.com/repos/${repo}/commits/${sha}`, token);
+    return {
+      sha,
+      files: (data.files || []).slice(0, 5).map(f => ({
+        filename: f.filename,
+        status: f.status, // added, removed, modified, renamed
+        additions: f.additions,
+        deletions: f.deletions,
+      })),
+      stats: data.stats || { additions: 0, deletions: 0, total: 0 },
+    };
+  } catch (error) {
+    console.error(`[fetchCommitDetails] Error fetching ${repo}/${sha}:`, error.message);
+    return null;
+  }
+}
+
+/**
+ * Fetch details for multiple fix commits to provide AI with richer context
+ * Limits to top N commits to avoid rate limiting
+ */
+async function fetchFixCommitDetails(fixCommits, token, limit = 8) {
+  const topFixes = fixCommits.slice(0, limit);
+  const results = [];
+
+  for (const commit of topFixes) {
+    const details = await fetchCommitDetails(commit.repo, commit.sha, token);
+    if (details) {
+      results.push({
+        ...commit,
+        fileChanges: details.files,
+        stats: details.stats,
+      });
+    }
+  }
+
+  return results;
+}
+
+/**
  * Get user's repositories including those they've contributed to
  */
 async function getUserRepos(username, token) {
@@ -694,7 +739,7 @@ function prepareCommitStats(allCommits) {
     else stats.messageStats.oneLiner++;
 
     // Categorize commits
-    const commitData = { repo: commit.repo, message: firstLine, date: commit.date, fullMessage: commit.message };
+    const commitData = { repo: commit.repo, sha: commit.sha, message: firstLine, date: commit.date, fullMessage: commit.message };
 
     if (msg.includes('revert')) stats.revertedCommits.push(commitData);
     if (msg.includes('merge')) stats.mergeCommits.push(commitData);
@@ -758,7 +803,7 @@ function prepareCommitStats(allCommits) {
  * Generate a comprehensive year-in-review using AI
  * Uses multiple passes to generate deep, insightful analysis
  */
-async function analyzeCommitsWithAI(allCommits, env) {
+async function analyzeCommitsWithAI(allCommits, env, token = null) {
   if (!allCommits || allCommits.length === 0) {
     return null;
   }
@@ -777,8 +822,27 @@ async function analyzeCommitsWithAI(allCommits, env) {
   const monthlyActivity = Object.entries(stats.byMonth)
     .sort(([,a], [,b]) => b - a);
 
-  // Get sample commits for each category
-  const fixSamples = stats.types.fixes.slice(0, 30).map(c => `[${c.repo}] ${c.message}`).join('\n');
+  // Fetch detailed file changes for top bug fix commits to give AI richer context
+  let fixCommitDetails = [];
+  if (token && stats.types.fixes.length > 0) {
+    console.log(`[AI Analysis] Fetching file change details for top fix commits...`);
+    fixCommitDetails = await fetchFixCommitDetails(stats.types.fixes, token, 10);
+    console.log(`[AI Analysis] Got details for ${fixCommitDetails.length} fix commits`);
+  }
+
+  // Format fix samples - use detailed info when available, fallback to basic format
+  let fixSamplesWithContext = '';
+  if (fixCommitDetails.length > 0) {
+    fixSamplesWithContext = fixCommitDetails.map(c => {
+      const files = c.fileChanges.map(f => `  - ${f.filename} (${f.status}: +${f.additions}/-${f.deletions})`).join('\n');
+      return `[${c.repo}] ${c.message}\nFiles changed (${c.stats.total} total: +${c.stats.additions}/-${c.stats.deletions}):\n${files}`;
+    }).join('\n\n');
+  }
+
+  // Also include additional fix commit messages (without file details)
+  const additionalFixSamples = stats.types.fixes.slice(fixCommitDetails.length, 30)
+    .map(c => `[${c.repo}] ${c.message}`).join('\n');
+
   const featureSamples = stats.types.features.slice(0, 30).map(c => `[${c.repo}] ${c.message}`).join('\n');
   const significantSamples = stats.significantCommits.slice(0, 20).map(c => `[${c.repo}] ${c.message}\n${c.fullMessage.split('\n').slice(1, 4).join('\n')}`).join('\n\n');
   const revertSamples = stats.revertedCommits.slice(0, 10).map(c => `[${c.repo}] ${c.message}`).join('\n');
@@ -813,8 +877,11 @@ ${monthlyActivity.map(([month, count]) => `${month}: ${count} commits`).join('\n
 ### Day of Week Distribution
 ${Object.entries(stats.byDayOfWeek).sort(([,a],[,b]) => b-a).map(([day, count]) => `${day}: ${count}`).join(', ')}
 
-### Sample Bug Fixes (showing challenges faced)
-${fixSamples || 'No bug fixes recorded'}
+### Bug Fixes with File Context (showing what was actually fixed)
+${fixSamplesWithContext || 'No detailed fix data available'}
+
+### Additional Bug Fix Commits
+${additionalFixSamples || 'No additional bug fixes'}
 
 ### Sample New Features (showing accomplishments)
 ${featureSamples || 'No features recorded'}
@@ -844,8 +911,8 @@ Write a comprehensive JSON response with the following structure. Each section s
   },
 
   "biggestStruggles": {
-    "overview": "A paragraph analyzing their struggles and challenges based on the fix commits",
-    "challenges": ["Array of 4-6 specific challenges with details about what they fought through"]
+    "overview": "A paragraph analyzing their struggles and challenges based on the fix commits and file changes",
+    "challenges": ["Array of 4-6 meaningful challenge descriptions. IMPORTANT: Do NOT just copy commit messages! Analyze the file changes and commit patterns to write insightful descriptions like 'Tackled complex authentication flow issues across 3 components, refactoring token handling to prevent session timeouts' or 'Debugged memory leaks in the caching layer, optimizing data structures to reduce heap usage'. Each challenge should explain WHAT was hard and WHY it mattered, not just state the commit title."]
   },
 
   "proudMoments": {
@@ -901,6 +968,8 @@ IMPORTANT GUIDELINES:
 - Be SUBSTANTIAL - each section should be meaningful and detailed
 - Be ENCOURAGING but HONEST - celebrate wins, acknowledge challenges
 - Be PERSONAL - write as if you really understand this developer's journey
+- NEVER just copy commit message titles as challenge or achievement descriptions. Use the file change context to understand WHAT was actually changed and write meaningful descriptions that explain the technical work and its significance.
+- For challenges/struggles: analyze the file names and changes to infer what systems were being debugged (e.g., "auth.ts" suggests authentication issues, "cache.js" suggests caching problems)
 
 Return ONLY the JSON, no other text.`;
 
@@ -1046,15 +1115,57 @@ ${stats.longestStreak > 7 ? `A ${stats.longestStreak}-day coding streak${stats.l
     `${stats.longestStreak} day longest coding streak${stats.longestStreak > 365 && stats.longestStreakStart && stats.longestStreakEnd ? ` (${stats.longestStreakStart} to ${stats.longestStreakEnd})` : ''}`
   ];
 
-  // Challenges
-  const challengesList = stats.types.fixes.slice(0, 6).map(c => c.message);
+  // Challenges - Group by repo and create meaningful descriptions
+  const challengesByRepo = {};
+  stats.types.fixes.forEach(c => {
+    if (!challengesByRepo[c.repo]) {
+      challengesByRepo[c.repo] = [];
+    }
+    challengesByRepo[c.repo].push(c.message);
+  });
+
+  const challengesList = Object.entries(challengesByRepo)
+    .sort(([,a], [,b]) => b.length - a.length)
+    .slice(0, 6)
+    .map(([repo, fixes]) => {
+      const repoName = repo.split('/').pop();
+      if (fixes.length >= 5) {
+        return `Resolved ${fixes.length} issues in ${repoName}, systematically improving stability and reliability`;
+      } else if (fixes.length >= 3) {
+        return `Tackled multiple bug fixes in ${repoName}, addressing critical issues and edge cases`;
+      } else {
+        return `Fixed issues in ${repoName}, ensuring smooth operation and user experience`;
+      }
+    });
+
   if (challengesList.length === 0) {
     challengesList.push('Maintaining code quality across multiple projects');
     challengesList.push('Balancing new features with bug fixes');
   }
 
-  // Achievements
-  const achievementsList = stats.types.features.slice(0, 6).map(c => c.message);
+  // Achievements - Group by repo and create meaningful descriptions
+  const achievementsByRepo = {};
+  stats.types.features.forEach(c => {
+    if (!achievementsByRepo[c.repo]) {
+      achievementsByRepo[c.repo] = [];
+    }
+    achievementsByRepo[c.repo].push(c.message);
+  });
+
+  const achievementsList = Object.entries(achievementsByRepo)
+    .sort(([,a], [,b]) => b.length - a.length)
+    .slice(0, 6)
+    .map(([repo, features]) => {
+      const repoName = repo.split('/').pop();
+      if (features.length >= 5) {
+        return `Built ${features.length} new features in ${repoName}, significantly expanding its capabilities`;
+      } else if (features.length >= 3) {
+        return `Implemented multiple new capabilities in ${repoName}, enhancing user experience`;
+      } else {
+        return `Added new functionality to ${repoName}, growing the project's feature set`;
+      }
+    });
+
   if (achievementsList.length === 0) {
     achievementsList.push('Consistent contribution throughout the year');
     achievementsList.push('Building and maintaining multiple repositories');
@@ -1306,7 +1417,7 @@ async function generateWrapped(username, year, token, env) {
       // Try AI analysis if env.AI is available
       if (env && env.AI) {
         console.log(`[generateWrapped] Attempting AI analysis of ${allCommits.length} commits`);
-        insights = await analyzeCommitsWithAI(allCommits, env);
+        insights = await analyzeCommitsWithAI(allCommits, env, token);
       }
       
       // Fallback to rule-based analysis if AI fails or unavailable
