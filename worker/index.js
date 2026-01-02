@@ -577,6 +577,59 @@ async function getUserEvents(username, token) {
 }
 
 /**
+ * Get user's pull request count for a specific year using GitHub Search API
+ * This properly counts ALL PRs for the year, unlike the Events API which only shows ~90 days
+ */
+async function getUserPullRequestCount(username, year, token) {
+  try {
+    // Search for PRs authored by the user in the given year
+    const query = `author:${username} type:pr created:${year}-01-01..${year}-12-31`;
+    const url = `https://api.github.com/search/issues?q=${encodeURIComponent(query)}&per_page=1`;
+    const result = await fetchGitHub(url, token);
+    console.log(`[PR Count] User ${username} has ${result.total_count} PRs in ${year}`);
+    return result.total_count || 0;
+  } catch (error) {
+    console.error(`Error fetching PR count for ${username}:`, error);
+    return 0;
+  }
+}
+
+/**
+ * Get user's issue count for a specific year using GitHub Search API
+ * This properly counts ALL issues for the year, unlike the Events API which only shows ~90 days
+ */
+async function getUserIssueCount(username, year, token) {
+  try {
+    // Search for issues authored by the user in the given year (excluding PRs)
+    const query = `author:${username} type:issue created:${year}-01-01..${year}-12-31`;
+    const url = `https://api.github.com/search/issues?q=${encodeURIComponent(query)}&per_page=1`;
+    const result = await fetchGitHub(url, token);
+    console.log(`[Issue Count] User ${username} has ${result.total_count} issues in ${year}`);
+    return result.total_count || 0;
+  } catch (error) {
+    console.error(`Error fetching issue count for ${username}:`, error);
+    return 0;
+  }
+}
+
+/**
+ * Get user's PR review count for a specific year using GitHub Search API
+ */
+async function getUserReviewCount(username, year, token) {
+  try {
+    // Search for PRs reviewed by the user in the given year
+    const query = `reviewed-by:${username} type:pr created:${year}-01-01..${year}-12-31`;
+    const url = `https://api.github.com/search/issues?q=${encodeURIComponent(query)}&per_page=1`;
+    const result = await fetchGitHub(url, token);
+    console.log(`[Review Count] User ${username} reviewed ${result.total_count} PRs in ${year}`);
+    return result.total_count || 0;
+  } catch (error) {
+    console.error(`Error fetching review count for ${username}:`, error);
+    return 0;
+  }
+}
+
+/**
  * Prepare comprehensive commit statistics for AI analysis
  */
 function prepareCommitStats(allCommits) {
@@ -1223,16 +1276,13 @@ async function generateWrapped(username, year, token, env) {
     .slice(0, 10) // Top 10 languages
     .map(([language, commits]) => ({ language, commits }));
   
-  // Get recent events for additional stats
-  const events = await getUserEvents(username, token);
-  const yearEvents = events.filter(event => {
-    const eventDate = new Date(event.created_at);
-    return eventDate.getFullYear() === parseInt(year);
-  });
-  
-  const pullRequests = yearEvents.filter(e => e.type === 'PullRequestEvent').length;
-  const issues = yearEvents.filter(e => e.type === 'IssuesEvent').length;
-  const reviews = yearEvents.filter(e => e.type === 'PullRequestReviewEvent').length;
+  // Get PR, issue, and review counts using Search API (accurate for full year)
+  // Note: Events API only shows ~90 days, so we use Search API instead
+  const [pullRequests, issues, reviews] = await Promise.all([
+    getUserPullRequestCount(username, year, token),
+    getUserIssueCount(username, year, token),
+    getUserReviewCount(username, year, token),
+  ]);
   
   // Generate AI insights from commits
   let insights = null;
