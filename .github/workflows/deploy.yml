@@ -36,7 +36,7 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: deploy --define BUILD_TIMESTAMP:\"${{ steps.timestamp.outputs.BUILD_TIMESTAMP }}\"
+          command: deploy --define BUILD_TIMESTAMP=${{ steps.timestamp.outputs.BUILD_TIMESTAMP }}
           secrets: |
             GITHUB_TOKEN
             GITHUB_CLIENT_ID
