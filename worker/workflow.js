@@ -233,30 +233,65 @@ export class GitHubWrappedWorkflow extends WorkflowEntrypoint {
       }
     );
 
-    // Step 16: Get user events
-    const events = await step.do(
-      'fetch-user-events',
+    // Step 16: Get PR count using Search API (accurate for full year)
+    const pullRequestCount = await step.do(
+      'fetch-pr-count',
       {
         retries: { limit: 3, delay: '2 seconds', backoff: 'exponential' },
         timeout: '30 seconds',
       },
       async () => {
         try {
-          return await fetchGitHub(
-            `https://api.github.com/users/${username}/events?per_page=100`,
-            token
-          );
+          const query = `author:${username} type:pr created:${year}-01-01..${year}-12-31`;
+          const url = `https://api.github.com/search/issues?q=${encodeURIComponent(query)}&per_page=1`;
+          const result = await fetchGitHub(url, token);
+          console.log(`[Workflow] User ${username} has ${result.total_count} PRs in ${year}`);
+          return result.total_count || 0;
         } catch {
-          return [];
+          return 0;
         }
       }
     );
 
-    // Calculate final stats
-    const yearEvents = events.filter((e) => {
-      const eventDate = new Date(e.created_at);
-      return eventDate.getFullYear() === parseInt(year);
-    });
+    // Step 17: Get issue count using Search API (accurate for full year)
+    const issueCount = await step.do(
+      'fetch-issue-count',
+      {
+        retries: { limit: 3, delay: '2 seconds', backoff: 'exponential' },
+        timeout: '30 seconds',
+      },
+      async () => {
+        try {
+          const query = `author:${username} type:issue created:${year}-01-01..${year}-12-31`;
+          const url = `https://api.github.com/search/issues?q=${encodeURIComponent(query)}&per_page=1`;
+          const result = await fetchGitHub(url, token);
+          console.log(`[Workflow] User ${username} has ${result.total_count} issues in ${year}`);
+          return result.total_count || 0;
+        } catch {
+          return 0;
+        }
+      }
+    );
+
+    // Step 18: Get review count using Search API (accurate for full year)
+    const reviewCount = await step.do(
+      'fetch-review-count',
+      {
+        retries: { limit: 3, delay: '2 seconds', backoff: 'exponential' },
+        timeout: '30 seconds',
+      },
+      async () => {
+        try {
+          const query = `reviewed-by:${username} type:pr created:${year}-01-01..${year}-12-31`;
+          const url = `https://api.github.com/search/issues?q=${encodeURIComponent(query)}&per_page=1`;
+          const result = await fetchGitHub(url, token);
+          console.log(`[Workflow] User ${username} reviewed ${result.total_count} PRs in ${year}`);
+          return result.total_count || 0;
+        } catch {
+          return 0;
+        }
+      }
+    );
 
     // Merge repo details with stats
     const repoContributions = analysis.repoStats.map((repo) => {
@@ -296,9 +331,9 @@ export class GitHubWrappedWorkflow extends WorkflowEntrypoint {
       year: parseInt(year),
       stats: {
         totalCommits: allCommits.length,
-        pullRequests: yearEvents.filter((e) => e.type === 'PullRequestEvent').length,
-        issues: yearEvents.filter((e) => e.type === 'IssuesEvent').length,
-        reviews: yearEvents.filter((e) => e.type === 'PullRequestReviewEvent').length,
+        pullRequests: pullRequestCount,
+        issues: issueCount,
+        reviews: reviewCount,
         repositoriesContributed: repoContributions.length,
         topRepositories: repoContributions.slice(0, 10),
         allRepositories: repoContributions,
