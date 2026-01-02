@@ -1989,7 +1989,7 @@ function handleOAuthLogin(env, corsHeaders) {
   const authUrl = new URL('https://github.com/login/oauth/authorize');
   authUrl.searchParams.set('client_id', clientId);
   authUrl.searchParams.set('redirect_uri', redirectUri);
-  authUrl.searchParams.set('scope', 'read:user');
+  authUrl.searchParams.set('scope', 'read:user repo');
   authUrl.searchParams.set('state', state);
   
   // Return the authorization URL and state
@@ -2211,16 +2211,14 @@ async function handleWorkflowStart(request, env, corsHeaders) {
   const url = new URL(request.url);
   let username = url.searchParams.get('username');
   const year = url.searchParams.get('year') || '2025';
-  const tokenFromQuery = url.searchParams.get('token') || null;
 
-  // Get token from session cookie
-  const sessionToken = getSessionToken(request);
-  const token = tokenFromQuery || sessionToken || env.GITHUB_TOKEN || null;
+  // Get token from OAuth session cookie only
+  const token = getSessionToken(request);
 
   // If no username provided but user is authenticated, use their username
-  if (!username && sessionToken) {
+  if (!username && token) {
     try {
-      const userInfo = await fetchGitHub('https://api.github.com/user', sessionToken);
+      const userInfo = await fetchGitHub('https://api.github.com/user', token);
       username = userInfo.login;
     } catch (error) {
       console.error('[Workflow] Failed to get authenticated user:', error);
@@ -2371,18 +2369,14 @@ async function handleRequest(request, env, ctx) {
     // Get query parameters
     let username = url.searchParams.get('username');
     const year = url.searchParams.get('year') || '2025';
-    const tokenFromQuery = url.searchParams.get('token') || null;
-    
-    // Get token from session cookie
-    const sessionToken = getSessionToken(request);
-    
-    // Priority: query parameter > session token > environment variable
-    const token = tokenFromQuery || sessionToken || env.GITHUB_TOKEN || null;
-    
+
+    // Get token from OAuth session cookie only
+    const token = getSessionToken(request);
+
     // If no username provided but user is authenticated, use their username
-    if (!username && sessionToken) {
+    if (!username && token) {
       try {
-        const userInfo = await fetchGitHub('https://api.github.com/user', sessionToken);
+        const userInfo = await fetchGitHub('https://api.github.com/user', token);
         username = userInfo.login;
         console.log(`[API] No username provided, using authenticated user: ${username}`);
       } catch (error) {

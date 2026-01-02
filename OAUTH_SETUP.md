@@ -123,14 +123,13 @@ APP_URL=http://localhost:8787
 2. Use Cloudflare Secrets for production (`wrangler secret put`)
 3. Use `.dev.vars` file for local development (add to `.gitignore`)
 4. Regularly rotate your OAuth secrets
-5. Only request the minimum required OAuth scopes (currently `read:user`)
+5. OAuth scopes used: `read:user` (profile info) and `repo` (access to private repositories)
 
 ## Additional Configuration
 
 ### Optional Environment Variables
 
 - `OAUTH_REDIRECT_URI`: Override the default callback URL if needed
-- `GITHUB_TOKEN`: Fallback token for unauthenticated requests (useful for CI/CD)
 
 ### Updating Secrets
 
