@@ -670,21 +670,32 @@ function prepareCommitStats(allCommits) {
 
   stats.messageStats.avgLength = Math.round(totalMessageLength / allCommits.length);
 
-  // Calculate longest streak
+  // Calculate longest streak with start/end dates
   if (dates.length > 0) {
     dates.sort((a, b) => a - b);
     let currentStreak = 1;
     let maxStreak = 1;
+    let streakStart = dates[0];
+    let maxStreakStart = dates[0];
+    let maxStreakEnd = dates[0];
+
     for (let i = 1; i < dates.length; i++) {
       const diffDays = Math.floor((dates[i] - dates[i-1]) / (1000 * 60 * 60 * 24));
       if (diffDays <= 1) {
         currentStreak++;
-        maxStreak = Math.max(maxStreak, currentStreak);
+        if (currentStreak > maxStreak) {
+          maxStreak = currentStreak;
+          maxStreakStart = streakStart;
+          maxStreakEnd = dates[i];
+        }
       } else {
         currentStreak = 1;
+        streakStart = dates[i];
       }
     }
     stats.longestStreak = maxStreak;
+    stats.longestStreakStart = maxStreakStart.toISOString().split('T')[0];
+    stats.longestStreakEnd = maxStreakEnd.toISOString().split('T')[0];
   }
 
   return stats;
@@ -901,6 +912,8 @@ Return ONLY the JSON, no other text.`;
         weekendCommits: stats.weekendCommits,
         lateNightCommits: stats.lateNightCommits,
         longestStreak: stats.longestStreak,
+        longestStreakStart: stats.longestStreakStart,
+        longestStreakEnd: stats.longestStreakEnd,
       };
 
     } catch (e) {
@@ -967,7 +980,7 @@ ${monthlyActivity[0] ? `Your peak month was ${monthlyActivity[0][0]} with ${mont
 
 With ${stats.types.features.length} feature commits and ${stats.types.fixes.length} bug fixes, you balanced building new capabilities with maintaining stability. Your work spanned ${repoCount} different repositories, demonstrating versatility and a willingness to contribute broadly.
 
-${stats.longestStreak > 7 ? `A ${stats.longestStreak}-day coding streak shows remarkable consistency.` : `You coded consistently throughout the year.`} Whether it was early morning or late night, you showed up and shipped code.`;
+${stats.longestStreak > 7 ? `A ${stats.longestStreak}-day coding streak${stats.longestStreak > 365 && stats.longestStreakStart && stats.longestStreakEnd ? ` (${stats.longestStreakStart} to ${stats.longestStreakEnd})` : ''} shows remarkable consistency.` : `You coded consistently throughout the year.`} Whether it was early morning or late night, you showed up and shipped code.`;
 
   // Year in numbers insights
   const yearInNumbersInsights = [
@@ -977,7 +990,7 @@ ${stats.longestStreak > 7 ? `A ${stats.longestStreak}-day coding streak shows re
     `${stats.types.fixes.length} bugs squashed and issues resolved`,
     `${stats.weekendCommits} weekend commits (${Math.round(stats.weekendCommits/totalCommits*100)}% of total)`,
     `${stats.lateNightCommits} late night commits showing dedication`,
-    `${stats.longestStreak} day longest coding streak`
+    `${stats.longestStreak} day longest coding streak${stats.longestStreak > 365 && stats.longestStreakStart && stats.longestStreakEnd ? ` (${stats.longestStreakStart} to ${stats.longestStreakEnd})` : ''}`
   ];
 
   // Challenges
@@ -1053,7 +1066,7 @@ ${stats.longestStreak > 7 ? `A ${stats.longestStreak}-day coding streak shows re
         `Consistent output: ${totalCommits} commits shows reliability`,
         `Versatility: contributed to ${repoCount} different repositories`,
         featureRatio > 0.2 ? 'Strong feature development skills' : 'Excellent maintenance and stability focus',
-        stats.longestStreak > 7 ? `Dedication: ${stats.longestStreak}-day coding streak` : 'Balanced work-life approach'
+        stats.longestStreak > 7 ? `Dedication: ${stats.longestStreak}-day coding streak${stats.longestStreak > 365 && stats.longestStreakStart && stats.longestStreakEnd ? ` (${stats.longestStreakStart} to ${stats.longestStreakEnd})` : ''}` : 'Balanced work-life approach'
       ],
       growthAreas: [
         stats.types.tests.length < totalCommits * 0.1 ? 'Could explore more test coverage' : 'Testing is already a strength',
@@ -1067,7 +1080,7 @@ Working across ${repoCount} repositories required adaptability and context-switc
       keyTransitions: [
         `Touched ${repoCount} different repositories`,
         `${stats.types.refactors.length} refactoring commits for code improvement`,
-        `Maintained ${stats.longestStreak}-day coding consistency`
+        `Maintained ${stats.longestStreak}-day coding consistency${stats.longestStreak > 365 && stats.longestStreakStart && stats.longestStreakEnd ? ` (${stats.longestStreakStart} to ${stats.longestStreakEnd})` : ''}`
       ]
     },
     topicsExplored: [
@@ -1096,6 +1109,8 @@ Working across ${repoCount} repositories required adaptability and context-switc
       weekendCommits: stats.weekendCommits,
       lateNightCommits: stats.lateNightCommits,
       longestStreak: stats.longestStreak,
+      longestStreakStart: stats.longestStreakStart,
+      longestStreakEnd: stats.longestStreakEnd,
     }
   };
 }
