@@ -434,7 +434,24 @@ function analyzeCommits(commits) {
   const hourlyActivity = new Array(24).fill(0);
   const dailyActivity = new Array(7).fill(0); // 0 = Sunday
   const monthlyActivity = new Array(12).fill(0);
+  const weeklyActivity = new Array(53).fill(0); // Week 1-53
+  const quarterlyActivity = new Array(4).fill(0); // Q1-Q4
   const commitsByDate = new Map(); // For streak calculation
+  const commitsByWeek = new Map(); // For finding best week with dates
+
+  // Helper to get ISO week number
+  function getWeekNumber(date) {
+    const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+    const dayNum = d.getUTCDay() || 7;
+    d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+    const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+    return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+  }
+
+  // Helper to get quarter from month (0-indexed)
+  function getQuarter(month) {
+    return Math.floor(month / 3);
+  }
 
   // Keywords for categorization
   const bugKeywords = ['fix', 'bug', 'issue', 'error', 'problem', 'broken', 'failing', 'debug', 'revert', 'hotfix', 'patch', 'crash', 'workaround'];
@@ -456,6 +473,19 @@ function analyzeCommits(commits) {
     hourlyActivity[date.getUTCHours()]++;
     dailyActivity[date.getUTCDay()]++;
     monthlyActivity[date.getUTCMonth()]++;
+
+    // Weekly and quarterly activity
+    const weekNum = getWeekNumber(date);
+    const quarter = getQuarter(date.getUTCMonth());
+    weeklyActivity[weekNum - 1]++; // 0-indexed
+    quarterlyActivity[quarter]++;
+
+    // Track week data for best week calculation
+    const weekKey = `${date.getUTCFullYear()}-W${String(weekNum).padStart(2, '0')}`;
+    if (!commitsByWeek.has(weekKey)) {
+      commitsByWeek.set(weekKey, { count: 0, weekNum, year: date.getUTCFullYear() });
+    }
+    commitsByWeek.get(weekKey).count++;
 
     // Categorize commit
     let category = 'other';
@@ -576,16 +606,62 @@ function analyzeCommits(commits) {
   else if (morningCommits > Math.max(afternoonCommits, eveningCommits)) codingStyle = 'early-bird';
   else if (eveningCommits > afternoonCommits) codingStyle = 'evening-coder';
 
+  // Find best week
+  let bestWeek = null;
+  let bestWeekCommits = 0;
+  for (const [weekKey, weekData] of commitsByWeek) {
+    if (weekData.count > bestWeekCommits) {
+      bestWeekCommits = weekData.count;
+      bestWeek = { key: weekKey, ...weekData };
+    }
+  }
+
+  // Find best quarter/season
+  const quarterNames = ['Q1 (Jan-Mar)', 'Q2 (Apr-Jun)', 'Q3 (Jul-Sep)', 'Q4 (Oct-Dec)'];
+  const seasonNames = ['Winter', 'Spring', 'Summer', 'Fall'];
+  const peakQuarter = quarterlyActivity.indexOf(Math.max(...quarterlyActivity));
+
+  // Calculate week date ranges for best week
+  function getWeekDateRange(year, weekNum) {
+    // Get the first day of the year
+    const jan1 = new Date(Date.UTC(year, 0, 1));
+    // Find the first Monday of the year
+    const dayOfWeek = jan1.getUTCDay() || 7;
+    const firstMonday = new Date(jan1);
+    firstMonday.setUTCDate(jan1.getUTCDate() + (dayOfWeek <= 4 ? 1 - dayOfWeek : 8 - dayOfWeek));
+    // Calculate the start of the target week
+    const weekStart = new Date(firstMonday);
+    weekStart.setUTCDate(firstMonday.getUTCDate() + (weekNum - 1) * 7);
+    const weekEnd = new Date(weekStart);
+    weekEnd.setUTCDate(weekStart.getUTCDate() + 6);
+    return {
+      start: weekStart.toISOString().split('T')[0],
+      end: weekEnd.toISOString().split('T')[0]
+    };
+  }
+
+  const bestWeekRange = bestWeek ? getWeekDateRange(bestWeek.year, bestWeek.weekNum) : null;
+
   return {
     repoMap,
     timeAnalysis: {
       hourlyActivity,
       dailyActivity,
       monthlyActivity,
+      weeklyActivity,
+      quarterlyActivity,
       peakHour,
       peakHourFormatted: `${peakHour}:00 - ${peakHour + 1}:00 UTC`,
       peakDay: dayNames[peakDay],
       peakMonth: monthNames[peakMonth],
+      peakQuarter: quarterNames[peakQuarter],
+      peakSeason: seasonNames[peakQuarter],
+      bestWeek: bestWeek ? {
+        weekNumber: bestWeek.weekNum,
+        year: bestWeek.year,
+        commits: bestWeekCommits,
+        dateRange: bestWeekRange
+      } : null,
       weekendCommits,
       weekdayCommits,
       isWeekendWarrior,
@@ -630,9 +706,35 @@ async function getUserPullRequestCount(username, year, token) {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       // Search for PRs authored by the user in the given year
-      const query = `author:${username} type:pr created:${year}-01-01..${year}-12-31`;
+      // Use is:pr instead of type:pr for better compatibility
+      const query = `author:${username} is:pr created:${year}-01-01..${year}-12-31`;
       const url = `https://api.github.com/search/issues?q=${encodeURIComponent(query)}&per_page=1`;
-      const result = await fetchGitHub(url, token);
+
+      console.log(`[PR Count] Searching with query: ${query}`);
+
+      // Make raw fetch to get more detailed error info
+      const headers = {
+        'User-Agent': 'GitHub-Wrapped',
+        'Accept': 'application/vnd.github.v3+json',
+      };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      const response = await fetch(url, { headers });
+
+      // Log rate limit info for debugging
+      const rateLimitRemaining = response.headers.get('X-RateLimit-Remaining');
+      const searchRateLimitRemaining = response.headers.get('X-RateLimit-Resource');
+      console.log(`[PR Count] Rate limit remaining: ${rateLimitRemaining}, Resource: ${searchRateLimitRemaining}`);
+
+      if (!response.ok) {
+        const errorBody = await response.text();
+        console.error(`[PR Count] API error ${response.status}: ${errorBody}`);
+        throw new Error(`GitHub API error: ${response.status} - ${errorBody}`);
+      }
+
+      const result = await response.json();
       const count = result.total_count || 0;
       console.log(`[PR Count] User ${username} has ${count} PRs in ${year}`);
       return count;
@@ -642,8 +744,8 @@ async function getUserPullRequestCount(username, year, token) {
         console.error(`[PR Count] All retries exhausted for ${username}, returning 0`);
         return 0;
       }
-      // Wait before retry (exponential backoff)
-      await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+      // Wait before retry (longer delay for Search API rate limits)
+      await new Promise(resolve => setTimeout(resolve, 2000 * attempt));
     }
   }
   return 0;
@@ -658,9 +760,34 @@ async function getUserIssueCount(username, year, token) {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       // Search for issues authored by the user in the given year (excluding PRs)
-      const query = `author:${username} type:issue created:${year}-01-01..${year}-12-31`;
+      // Use is:issue instead of type:issue for better compatibility
+      const query = `author:${username} is:issue created:${year}-01-01..${year}-12-31`;
       const url = `https://api.github.com/search/issues?q=${encodeURIComponent(query)}&per_page=1`;
-      const result = await fetchGitHub(url, token);
+
+      console.log(`[Issue Count] Searching with query: ${query}`);
+
+      // Make raw fetch to get more detailed error info
+      const headers = {
+        'User-Agent': 'GitHub-Wrapped',
+        'Accept': 'application/vnd.github.v3+json',
+      };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      const response = await fetch(url, { headers });
+
+      // Log rate limit info for debugging
+      const rateLimitRemaining = response.headers.get('X-RateLimit-Remaining');
+      console.log(`[Issue Count] Rate limit remaining: ${rateLimitRemaining}`);
+
+      if (!response.ok) {
+        const errorBody = await response.text();
+        console.error(`[Issue Count] API error ${response.status}: ${errorBody}`);
+        throw new Error(`GitHub API error: ${response.status} - ${errorBody}`);
+      }
+
+      const result = await response.json();
       const count = result.total_count || 0;
       console.log(`[Issue Count] User ${username} has ${count} issues in ${year}`);
       return count;
@@ -670,8 +797,8 @@ async function getUserIssueCount(username, year, token) {
         console.error(`[Issue Count] All retries exhausted for ${username}, returning 0`);
         return 0;
       }
-      // Wait before retry (exponential backoff)
-      await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+      // Wait before retry (longer delay for Search API rate limits)
+      await new Promise(resolve => setTimeout(resolve, 2000 * attempt));
     }
   }
   return 0;
@@ -685,9 +812,28 @@ async function getUserReviewCount(username, year, token) {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       // Search for PRs reviewed by the user in the given year
-      const query = `reviewed-by:${username} type:pr created:${year}-01-01..${year}-12-31`;
+      const query = `reviewed-by:${username} is:pr created:${year}-01-01..${year}-12-31`;
       const url = `https://api.github.com/search/issues?q=${encodeURIComponent(query)}&per_page=1`;
-      const result = await fetchGitHub(url, token);
+
+      console.log(`[Review Count] Searching with query: ${query}`);
+
+      const headers = {
+        'User-Agent': 'GitHub-Wrapped',
+        'Accept': 'application/vnd.github.v3+json',
+      };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      const response = await fetch(url, { headers });
+
+      if (!response.ok) {
+        const errorBody = await response.text();
+        console.error(`[Review Count] API error ${response.status}: ${errorBody}`);
+        throw new Error(`GitHub API error: ${response.status} - ${errorBody}`);
+      }
+
+      const result = await response.json();
       const count = result.total_count || 0;
       console.log(`[Review Count] User ${username} reviewed ${count} PRs in ${year}`);
       return count;
@@ -697,8 +843,8 @@ async function getUserReviewCount(username, year, token) {
         console.error(`[Review Count] All retries exhausted for ${username}, returning 0`);
         return 0;
       }
-      // Wait before retry (exponential backoff)
-      await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+      // Wait before retry (longer delay for Search API rate limits)
+      await new Promise(resolve => setTimeout(resolve, 2000 * attempt));
     }
   }
   return 0;
@@ -1630,6 +1776,9 @@ async function generateWrapped(username, year, token, env) {
       peakHour: timeAnalysis.peakHourFormatted,
       peakDay: timeAnalysis.peakDay,
       peakMonth: timeAnalysis.peakMonth,
+      peakQuarter: timeAnalysis.peakQuarter,
+      peakSeason: timeAnalysis.peakSeason,
+      bestWeek: timeAnalysis.bestWeek,
       codingStyle: timeAnalysis.codingStyle,
       isWeekendWarrior: timeAnalysis.isWeekendWarrior,
       weekendCommits: timeAnalysis.weekendCommits,
@@ -1637,6 +1786,12 @@ async function generateWrapped(username, year, token, env) {
       hourlyActivity: timeAnalysis.hourlyActivity,
       dailyActivity: timeAnalysis.dailyActivity,
       monthlyActivity: timeAnalysis.monthlyActivity,
+      weeklyActivity: timeAnalysis.weeklyActivity,
+      quarterlyActivity: timeAnalysis.quarterlyActivity,
+      nightCommits: timeAnalysis.nightCommits,
+      morningCommits: timeAnalysis.morningCommits,
+      afternoonCommits: timeAnalysis.afternoonCommits,
+      eveningCommits: timeAnalysis.eveningCommits,
     },
     // Streak data
     streaks: {
