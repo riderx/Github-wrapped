@@ -173,6 +173,11 @@ The Cloudflare Worker:
        - This token will be automatically passed to the Cloudflare Worker as `GITHUB_TOKEN`
        - Used to avoid GitHub API rate limits when fetching commit data
        - Without this, the worker will use unauthenticated requests (limited to 60 requests/hour)
+     - `G_CLIENT_ID`: Your GitHub OAuth App Client ID (for OAuth login feature)
+     - `G_CLIENT_SECRET`: Your GitHub OAuth App Client Secret (for OAuth login feature)
+     - `APP_URL`: Your deployed app URL (e.g., `https://github-wrapped.your-subdomain.workers.dev`)
+   
+   > **Note**: GitHub Actions doesn't allow secrets starting with `GITHUB_`, so OAuth secrets use `G_CLIENT_ID` and `G_CLIENT_SECRET`.
 
 3. **Deploy:**
    - Push to `main` branch or manually trigger the workflow

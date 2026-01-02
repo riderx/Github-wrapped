@@ -22,9 +22,26 @@ This guide will help you set up GitHub OAuth for the GitHub Wrapped application.
 5. Note down the **Client ID**
 6. Click "Generate a new client secret" and note it down (you won't be able to see it again)
 
-### 2. Configure Cloudflare Worker Secrets
+### 2. Configure Secrets
 
-For production deployment, use Wrangler secrets:
+#### For GitHub Actions Deployment (Recommended)
+
+If you're deploying via GitHub Actions (already configured in this repo), add these secrets to your GitHub repository:
+
+1. Go to your GitHub repository → Settings → Secrets and variables → Actions
+2. Click "New repository secret" and add the following:
+   - **Name**: `G_CLIENT_ID`  
+     **Value**: Your GitHub OAuth App Client ID
+   - **Name**: `G_CLIENT_SECRET`  
+     **Value**: Your GitHub OAuth App Client Secret
+   - **Name**: `APP_URL`  
+     **Value**: Your deployed worker URL (e.g., `https://github-wrapped.your-subdomain.workers.dev`)
+
+> **Note**: GitHub Actions doesn't allow secret names starting with `GITHUB_`, so we use `G_CLIENT_ID` and `G_CLIENT_SECRET`. The workflow automatically maps these to the correct environment variable names in the worker.
+
+#### For Manual Deployment with Wrangler
+
+For manual deployment using Wrangler CLI:
 
 ```bash
 # Navigate to your project directory
