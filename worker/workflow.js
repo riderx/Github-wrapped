@@ -31,7 +31,7 @@ async function fetchGitHub(url, token) {
 }
 
 /**
- * Search commits for a specific date range
+ * Search commits for a specific date range with retry logic and rate limiting
  */
 async function searchCommitsInRange(username, startDate, endDate, token) {
   const dateRange = `${startDate}..${endDate}`;
@@ -39,58 +39,102 @@ async function searchCommitsInRange(username, startDate, endDate, token) {
   let page = 1;
   let totalCount = 0;
   let incomplete = false;
+  const maxRetries = 5;
 
   while (true) {
-    try {
-      const searchUrl = `https://api.github.com/search/commits?q=author:${username}+committer-date:${dateRange}&per_page=100&page=${page}&sort=committer-date&order=desc`;
+    let retryCount = 0;
+    let success = false;
+    let data = null;
 
-      const headers = {
-        'User-Agent': 'GitHub-Wrapped',
-        'Accept': 'application/vnd.github.cloak-preview+json',
-      };
+    while (retryCount < maxRetries && !success) {
+      try {
+        const searchUrl = `https://api.github.com/search/commits?q=author:${username}+committer-date:${dateRange}&per_page=100&page=${page}&sort=committer-date&order=desc`;
 
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
+        const headers = {
+          'User-Agent': 'GitHub-Wrapped',
+          'Accept': 'application/vnd.github.cloak-preview+json',
+        };
 
-      const response = await fetch(searchUrl, { headers });
-
-      if (!response.ok) {
-        if (response.status === 403 || response.status === 422) {
-          incomplete = true;
-          break;
+        if (token) {
+          headers['Authorization'] = `Bearer ${token}`;
         }
-        break;
+
+        const response = await fetch(searchUrl, { headers });
+
+        // Check rate limit headers
+        const rateLimitRemaining = response.headers.get('X-RateLimit-Remaining');
+        const rateLimitReset = response.headers.get('X-RateLimit-Reset');
+        console.log(`[Workflow searchCommits] ${dateRange} page ${page} - Rate limit remaining: ${rateLimitRemaining}`);
+
+        if (!response.ok) {
+          if (response.status === 403) {
+            // Rate limited - wait and retry
+            const resetTime = rateLimitReset ? parseInt(rateLimitReset) * 1000 : Date.now() + 60000;
+            const waitTime = Math.max(resetTime - Date.now(), 2000);
+            const waitSeconds = Math.min(Math.ceil(waitTime / 1000), 65);
+            console.log(`[Workflow searchCommits] Rate limit hit for ${dateRange}, waiting ${waitSeconds}s before retry ${retryCount + 1}/${maxRetries}`);
+            await new Promise(resolve => setTimeout(resolve, waitSeconds * 1000));
+            retryCount++;
+            continue;
+          }
+          if (response.status === 422) {
+            // GitHub returns 422 when pagination goes beyond 1000
+            console.log(`[Workflow searchCommits] Pagination limit reached for ${dateRange}, need to split`);
+            incomplete = true;
+            success = true; // Exit retry loop
+            break;
+          }
+          console.error(`[Workflow searchCommits] API error ${response.status} for ${dateRange}`);
+          retryCount++;
+          await new Promise(resolve => setTimeout(resolve, 2000 * retryCount));
+          continue;
+        }
+
+        data = await response.json();
+        success = true;
+
+        // Add delay between successful requests to avoid hitting rate limits
+        // GitHub Search API has 30 requests/minute limit
+        await new Promise(resolve => setTimeout(resolve, 2200));
+
+      } catch (error) {
+        console.error(`[Workflow searchCommits] Error for ${dateRange} (attempt ${retryCount + 1}):`, error.message);
+        retryCount++;
+        await new Promise(resolve => setTimeout(resolve, 2000 * retryCount));
       }
+    }
 
-      const data = await response.json();
-      totalCount = data.total_count || 0;
-      const items = data.items || [];
-
-      if (items.length === 0) break;
-
-      for (const item of items) {
-        const commit = item.commit;
-        commits.push({
-          sha: item.sha,
-          message: commit.message,
-          date: commit.committer?.date || commit.author?.date,
-          repo: item.repository?.full_name || 'unknown/unknown',
-          url: item.html_url,
-        });
-      }
-
-      if (page >= 10 && totalCount > 1000) {
-        incomplete = true;
-        break;
-      }
-
-      if (items.length < 100) break;
-      page++;
-    } catch (error) {
-      console.error(`Error searching commits for ${dateRange}:`, error.message);
+    if (!success) {
+      console.error(`[Workflow searchCommits] All retries exhausted for ${dateRange} page ${page}`);
+      incomplete = true;
       break;
     }
+
+    if (incomplete) break; // Handle 422 case
+
+    totalCount = data.total_count || 0;
+    const items = data.items || [];
+
+    if (items.length === 0) break;
+
+    for (const item of items) {
+      const commit = item.commit;
+      commits.push({
+        sha: item.sha,
+        message: commit.message,
+        date: commit.committer?.date || commit.author?.date,
+        repo: item.repository?.full_name || 'unknown/unknown',
+        url: item.html_url,
+      });
+    }
+
+    if (page >= 10 && totalCount > 1000) {
+      incomplete = true;
+      break;
+    }
+
+    if (items.length < 100) break;
+    page++;
   }
 
   return { commits, totalCount, incomplete };

@@ -2,7 +2,8 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "github-wrapped",
   "main": "worker/index.js",
-  "compatibility_date": "2024-10-22",
+  "compatibility_date": "2025-09-01",
+  "compatibility_flags": ["nodejs_compat"],
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS"

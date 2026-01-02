@@ -1,11 +1,14 @@
 /**
  * Cloudflare Worker for GitHub Wrapped API
  * Handles GitHub API requests with caching support
- * Uses Cloudflare Workflows for durable, long-running commit fetching
+ * Uses isomorphic-git + node:fs for fast local git-based commit fetching (NO API RATE LIMITS)
  */
 
 // Re-export the workflow class for Cloudflare
 export { GitHubWrappedWorkflow } from './workflow.js';
+
+// Import local git functions for fast commit fetching
+import { fetchCommitsWithLocalGit, fetchCommitsPerRepoAPI } from './git-local.js';
 
 /**
  * Get CORS headers for a request
@@ -273,70 +276,106 @@ async function searchCommitsInRange(username, startDate, endDate, token) {
   let page = 1;
   let totalCount = 0;
   let incomplete = false;
+  const maxRetries = 5;
 
   while (true) {
-    try {
-      const searchUrl = `https://api.github.com/search/commits?q=author:${username}+committer-date:${dateRange}&per_page=100&page=${page}&sort=committer-date&order=desc`;
+    let retryCount = 0;
+    let success = false;
+    let data = null;
 
-      const headers = {
-        'User-Agent': 'GitHub-Wrapped',
-        'Accept': 'application/vnd.github.cloak-preview+json',
-      };
+    while (retryCount < maxRetries && !success) {
+      try {
+        const searchUrl = `https://api.github.com/search/commits?q=author:${username}+committer-date:${dateRange}&per_page=100&page=${page}&sort=committer-date&order=desc`;
 
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
+        const headers = {
+          'User-Agent': 'GitHub-Wrapped',
+          'Accept': 'application/vnd.github.cloak-preview+json',
+        };
 
-      const response = await fetch(searchUrl, { headers });
-
-      if (!response.ok) {
-        if (response.status === 403) {
-          console.error(`[searchCommitsInRange] Rate limit hit for ${dateRange}`);
-          incomplete = true;
-          break;
+        if (token) {
+          headers['Authorization'] = `Bearer ${token}`;
         }
-        if (response.status === 422) {
-          // GitHub returns 422 when pagination goes beyond 1000
-          console.log(`[searchCommitsInRange] Pagination limit reached for ${dateRange}, need to split`);
-          incomplete = true;
-          break;
+
+        const response = await fetch(searchUrl, { headers });
+
+        // Check rate limit headers
+        const rateLimitRemaining = response.headers.get('X-RateLimit-Remaining');
+        const rateLimitReset = response.headers.get('X-RateLimit-Reset');
+        console.log(`[searchCommitsInRange] ${dateRange} page ${page} - Rate limit remaining: ${rateLimitRemaining}`);
+
+        if (!response.ok) {
+          if (response.status === 403) {
+            // Rate limited - wait and retry
+            const resetTime = rateLimitReset ? parseInt(rateLimitReset) * 1000 : Date.now() + 60000;
+            const waitTime = Math.max(resetTime - Date.now(), 2000);
+            const waitSeconds = Math.min(Math.ceil(waitTime / 1000), 65); // Cap at 65 seconds
+            console.log(`[searchCommitsInRange] Rate limit hit for ${dateRange}, waiting ${waitSeconds}s before retry ${retryCount + 1}/${maxRetries}`);
+            await new Promise(resolve => setTimeout(resolve, waitSeconds * 1000));
+            retryCount++;
+            continue;
+          }
+          if (response.status === 422) {
+            // GitHub returns 422 when pagination goes beyond 1000
+            console.log(`[searchCommitsInRange] Pagination limit reached for ${dateRange}, need to split`);
+            incomplete = true;
+            success = true; // Exit retry loop, handle splitting
+            break;
+          }
+          console.error(`[searchCommitsInRange] API error ${response.status} for ${dateRange}`);
+          retryCount++;
+          await new Promise(resolve => setTimeout(resolve, 2000 * retryCount));
+          continue;
         }
-        console.error(`[searchCommitsInRange] API error ${response.status} for ${dateRange}`);
-        break;
+
+        data = await response.json();
+        success = true;
+
+        // Add small delay between successful requests to avoid hitting rate limits
+        // GitHub Search API has 30 requests/minute limit
+        await new Promise(resolve => setTimeout(resolve, 2200));
+
+      } catch (error) {
+        console.error(`[searchCommitsInRange] Error for ${dateRange} (attempt ${retryCount + 1}):`, error.message);
+        retryCount++;
+        await new Promise(resolve => setTimeout(resolve, 2000 * retryCount));
       }
+    }
 
-      const data = await response.json();
-      totalCount = data.total_count || 0;
-      const items = data.items || [];
-
-      if (items.length === 0) break;
-
-      for (const item of items) {
-        const commit = item.commit;
-        commits.push({
-          sha: item.sha,
-          message: commit.message,
-          date: commit.committer?.date || commit.author?.date,
-          repo: item.repository?.full_name || 'unknown/unknown',
-          url: item.html_url,
-        });
-      }
-
-      // Check if we've hit the 1000 result limit
-      if (page >= 10) {
-        // GitHub only allows 10 pages (1000 results) max
-        if (totalCount > 1000) {
-          incomplete = true;
-        }
-        break;
-      }
-
-      if (items.length < 100) break;
-      page++;
-    } catch (error) {
-      console.error(`[searchCommitsInRange] Error for ${dateRange}:`, error.message);
+    if (!success) {
+      console.error(`[searchCommitsInRange] All retries exhausted for ${dateRange} page ${page}`);
+      incomplete = true;
       break;
     }
+
+    if (incomplete) break; // Handle 422 case
+
+    totalCount = data.total_count || 0;
+    const items = data.items || [];
+
+    if (items.length === 0) break;
+
+    for (const item of items) {
+      const commit = item.commit;
+      commits.push({
+        sha: item.sha,
+        message: commit.message,
+        date: commit.committer?.date || commit.author?.date,
+        repo: item.repository?.full_name || 'unknown/unknown',
+        url: item.html_url,
+      });
+    }
+
+    // Check if we've hit the 1000 result limit
+    if (page >= 10) {
+      // GitHub only allows 10 pages (1000 results) max
+      if (totalCount > 1000) {
+        incomplete = true;
+      }
+      break;
+    }
+
+    if (items.length < 100) break;
+    page++;
   }
 
   return { commits, totalCount, incomplete };
@@ -1562,9 +1601,27 @@ async function generateWrapped(username, year, token, env) {
   const userInfo = await getUserInfo(username, token);
   console.log(`[generateWrapped] User info retrieved for ${userInfo.login}`);
 
-  // Use GitHub Search API to find ALL commits by this user across ALL repositories
-  console.log(`[generateWrapped] Using Search API to find ALL commits across ALL repositories - NO LIMITS`);
-  const allCommits = await searchAllCommitsByUser(username, year, token);
+  // Use local git cloning for FAST commit fetching (NO API RATE LIMITS)
+  // Falls back to per-repo API if git cloning fails
+  let allCommits = [];
+
+  if (token) {
+    try {
+      console.log(`[generateWrapped] Using isomorphic-git for fast local commit fetching - NO RATE LIMITS!`);
+      const gitResult = await fetchCommitsWithLocalGit(username, year, token);
+      allCommits = gitResult.commits;
+      console.log(`[generateWrapped] Local git fetched ${allCommits.length} commits from ${gitResult.repos.length} repos`);
+    } catch (error) {
+      console.error(`[generateWrapped] Local git failed, falling back to Search API:`, error.message);
+      // Fall back to Search API
+      console.log(`[generateWrapped] Using Search API to find ALL commits across ALL repositories`);
+      allCommits = await searchAllCommitsByUser(username, year, token);
+    }
+  } else {
+    // No token = use Search API (slower, rate limited, but works without auth for public repos)
+    console.log(`[generateWrapped] No token provided, using Search API (slower, may hit rate limits)`);
+    allCommits = await searchAllCommitsByUser(username, year, token);
+  }
 
   // Analyze commits for deep insights
   const analysis = analyzeCommits(allCommits);
