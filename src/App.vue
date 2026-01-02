@@ -71,8 +71,15 @@
 
         <!-- Loading State -->
         <div v-if="loading" class="loading-section fade-in">
-          <div class="spinner"></div>
-          <p class="loading-text">Reading your story...</p>
+          <div class="loading-card">
+            <div class="loading-icon">
+              <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" class="loading-svg">
+                <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2" stroke-linecap="round" class="loading-circle" />
+              </svg>
+            </div>
+            <p class="loading-text">Reading your story...</p>
+            <p class="loading-subtext">Gathering commits, PRs, and more</p>
+          </div>
         </div>
 
         <!-- Wrapped Display -->
@@ -476,16 +483,37 @@ export default {
 .loading-section {
   text-align: center;
   padding: var(--space-xl);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 400px;
 }
 
-.spinner {
-  width: 60px;
-  height: 60px;
-  border: 3px solid var(--bg-elevated);
-  border-top-color: var(--accent-primary);
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
+.loading-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: var(--space-xl) var(--space-xl);
+  max-width: 320px;
+  width: 100%;
+}
+
+.loading-icon {
+  width: 64px;
+  height: 64px;
   margin: 0 auto var(--space-lg);
+}
+
+.loading-svg {
+  width: 100%;
+  height: 100%;
+  color: var(--text-secondary);
+  animation: spin 1.5s linear infinite;
+}
+
+.loading-circle {
+  stroke-dasharray: 50;
+  stroke-dashoffset: 15;
 }
 
 @keyframes spin {
@@ -496,6 +524,13 @@ export default {
 
 .loading-text {
   font-size: var(--font-body-lg);
+  color: var(--text-primary);
+  font-weight: 600;
+  margin-bottom: var(--space-sm);
+}
+
+.loading-subtext {
+  font-size: var(--font-caption);
   color: var(--text-secondary);
 }
 
