@@ -577,273 +577,526 @@ async function getUserEvents(username, token) {
 }
 
 /**
- * Analyze commit messages using AI to extract meaningful insights
+ * Prepare comprehensive commit statistics for AI analysis
+ */
+function prepareCommitStats(allCommits) {
+  const stats = {
+    total: allCommits.length,
+    byRepo: {},
+    byMonth: {},
+    byDayOfWeek: {},
+    byHour: {},
+    types: { fixes: [], features: [], refactors: [], docs: [], tests: [], other: [] },
+    longestStreak: 0,
+    lateNightCommits: 0,
+    weekendCommits: 0,
+    messageStats: { avgLength: 0, detailed: 0, oneLiner: 0 },
+    significantCommits: [],
+    revertedCommits: [],
+    mergeCommits: [],
+  };
+
+  const struggleKeywords = ['fix', 'bug', 'issue', 'error', 'problem', 'broken', 'failing', 'debug', 'revert', 'hotfix', 'patch', 'workaround', 'crash', 'memory leak', 'timeout'];
+  const featureKeywords = ['add', 'implement', 'create', 'new', 'feature', 'support', 'enable', 'introduce', 'launch'];
+  const refactorKeywords = ['refactor', 'cleanup', 'improve', 'optimize', 'reorganize', 'simplify', 'restructure', 'migrate', 'upgrade'];
+  const docsKeywords = ['doc', 'readme', 'comment', 'documentation', 'changelog'];
+  const testKeywords = ['test', 'spec', 'coverage', 'e2e', 'unit test', 'integration'];
+
+  let totalMessageLength = 0;
+  const dates = [];
+
+  allCommits.forEach(commit => {
+    const msg = commit.message.toLowerCase();
+    const firstLine = commit.message.split('\n')[0];
+    const date = new Date(commit.date);
+    const month = date.toLocaleString('default', { month: 'long', year: 'numeric' });
+    const dayOfWeek = date.toLocaleString('default', { weekday: 'long' });
+    const hour = date.getHours();
+
+    dates.push(date);
+
+    // By repo
+    stats.byRepo[commit.repo] = stats.byRepo[commit.repo] || { count: 0, commits: [] };
+    stats.byRepo[commit.repo].count++;
+    stats.byRepo[commit.repo].commits.push({ message: firstLine, date: commit.date });
+
+    // By month
+    stats.byMonth[month] = (stats.byMonth[month] || 0) + 1;
+
+    // By day of week
+    stats.byDayOfWeek[dayOfWeek] = (stats.byDayOfWeek[dayOfWeek] || 0) + 1;
+
+    // By hour
+    stats.byHour[hour] = (stats.byHour[hour] || 0) + 1;
+
+    // Weekend commits
+    if (date.getDay() === 0 || date.getDay() === 6) stats.weekendCommits++;
+
+    // Late night commits (10pm - 4am)
+    if (hour >= 22 || hour <= 4) stats.lateNightCommits++;
+
+    // Message stats
+    totalMessageLength += commit.message.length;
+    if (commit.message.split('\n').length > 2) stats.messageStats.detailed++;
+    else stats.messageStats.oneLiner++;
+
+    // Categorize commits
+    const commitData = { repo: commit.repo, message: firstLine, date: commit.date, fullMessage: commit.message };
+
+    if (msg.includes('revert')) stats.revertedCommits.push(commitData);
+    if (msg.includes('merge')) stats.mergeCommits.push(commitData);
+
+    if (struggleKeywords.some(kw => msg.includes(kw))) {
+      stats.types.fixes.push(commitData);
+    } else if (featureKeywords.some(kw => msg.includes(kw))) {
+      stats.types.features.push(commitData);
+    } else if (refactorKeywords.some(kw => msg.includes(kw))) {
+      stats.types.refactors.push(commitData);
+    } else if (docsKeywords.some(kw => msg.includes(kw))) {
+      stats.types.docs.push(commitData);
+    } else if (testKeywords.some(kw => msg.includes(kw))) {
+      stats.types.tests.push(commitData);
+    } else {
+      stats.types.other.push(commitData);
+    }
+
+    // Significant commits (detailed messages or important keywords)
+    if (commit.message.length > 200 ||
+        msg.includes('major') || msg.includes('breaking') || msg.includes('release') ||
+        msg.includes('shipped') || msg.includes('complete') || msg.includes('milestone')) {
+      stats.significantCommits.push(commitData);
+    }
+  });
+
+  stats.messageStats.avgLength = Math.round(totalMessageLength / allCommits.length);
+
+  // Calculate longest streak
+  if (dates.length > 0) {
+    dates.sort((a, b) => a - b);
+    let currentStreak = 1;
+    let maxStreak = 1;
+    for (let i = 1; i < dates.length; i++) {
+      const diffDays = Math.floor((dates[i] - dates[i-1]) / (1000 * 60 * 60 * 24));
+      if (diffDays <= 1) {
+        currentStreak++;
+        maxStreak = Math.max(maxStreak, currentStreak);
+      } else {
+        currentStreak = 1;
+      }
+    }
+    stats.longestStreak = maxStreak;
+  }
+
+  return stats;
+}
+
+/**
+ * Generate a comprehensive year-in-review using AI
+ * Uses multiple passes to generate deep, insightful analysis
  */
 async function analyzeCommitsWithAI(allCommits, env) {
   if (!allCommits || allCommits.length === 0) {
     return null;
   }
-  
-  // Prepare commit data for AI analysis
-  const commitSample = allCommits.slice(0, 200); // Analyze up to 200 commits
-  const commitText = commitSample.map((c, i) => 
-    `${i + 1}. [${c.repo}] ${c.message.split('\n')[0]}`
-  ).join('\n');
-  
-  const prompt = `Analyze these GitHub commits from a developer's year and provide deep, insightful observations:
 
-${commitText}
+  console.log(`[AI Analysis] Starting deep analysis of ${allCommits.length} commits`);
 
-Based on these commits, provide a detailed analysis in JSON format with these sections:
+  // Prepare comprehensive statistics
+  const stats = prepareCommitStats(allCommits);
 
-1. "story": A 2-3 sentence narrative about this developer's year - what was their journey?
-2. "mainTheme": One sentence describing the overarching theme of their work
-3. "biggestStruggles": Array of 2-3 specific challenges they faced (with evidence from commit messages)
-4. "proudMoments": Array of 2-3 achievements or breakthroughs (with evidence)
-5. "workStyle": Object describing their development style:
-   - "pace": "steady", "burst", or "sprint"
-   - "approach": "perfectionist", "pragmatic", "experimental", etc.
-   - "description": 1 sentence description
-6. "topicsExplored": Array of 3-5 technical topics/technologies they worked on
-7. "evolutionInsight": How did their work evolve through the year?
-8. "funFact": One interesting, specific observation about their commit patterns
+  // Sort repos by commit count
+  const topRepos = Object.entries(stats.byRepo)
+    .sort(([,a], [,b]) => b.count - a.count)
+    .slice(0, 20);
 
-Return only valid JSON, no other text.`;
+  // Sort months by commits
+  const monthlyActivity = Object.entries(stats.byMonth)
+    .sort(([,a], [,b]) => b - a);
+
+  // Get sample commits for each category
+  const fixSamples = stats.types.fixes.slice(0, 30).map(c => `[${c.repo}] ${c.message}`).join('\n');
+  const featureSamples = stats.types.features.slice(0, 30).map(c => `[${c.repo}] ${c.message}`).join('\n');
+  const significantSamples = stats.significantCommits.slice(0, 20).map(c => `[${c.repo}] ${c.message}\n${c.fullMessage.split('\n').slice(1, 4).join('\n')}`).join('\n\n');
+  const revertSamples = stats.revertedCommits.slice(0, 10).map(c => `[${c.repo}] ${c.message}`).join('\n');
+
+  // Create the comprehensive prompt
+  const analysisPrompt = `You are an expert storyteller and data analyst. Your task is to write a COMPREHENSIVE, DETAILED year-in-review for a developer based on their GitHub activity. This should be a rich, insightful, and substantial narrative - think of it like an annual report or a detailed personal retrospective.
+
+## RAW DATA
+
+### Overall Statistics
+- Total Commits: ${stats.total}
+- Repositories Contributed To: ${Object.keys(stats.byRepo).length}
+- Bug Fixes & Issue Resolution: ${stats.types.fixes.length} commits
+- New Features & Implementations: ${stats.types.features.length} commits
+- Refactoring & Improvements: ${stats.types.refactors.length} commits
+- Documentation: ${stats.types.docs.length} commits
+- Testing: ${stats.types.tests.length} commits
+- Weekend Commits: ${stats.weekendCommits} (${Math.round(stats.weekendCommits/stats.total*100)}%)
+- Late Night Commits (10PM-4AM): ${stats.lateNightCommits} (${Math.round(stats.lateNightCommits/stats.total*100)}%)
+- Longest Coding Streak: ${stats.longestStreak} consecutive days
+- Reverted Commits: ${stats.revertedCommits.length}
+- Average Commit Message Length: ${stats.messageStats.avgLength} characters
+- Detailed Commits (multi-line): ${stats.messageStats.detailed}
+- One-liner Commits: ${stats.messageStats.oneLiner}
+
+### Top Repositories (by commits)
+${topRepos.map(([repo, data], i) => `${i+1}. ${repo}: ${data.count} commits`).join('\n')}
+
+### Monthly Activity
+${monthlyActivity.map(([month, count]) => `${month}: ${count} commits`).join('\n')}
+
+### Day of Week Distribution
+${Object.entries(stats.byDayOfWeek).sort(([,a],[,b]) => b-a).map(([day, count]) => `${day}: ${count}`).join(', ')}
+
+### Sample Bug Fixes (showing challenges faced)
+${fixSamples || 'No bug fixes recorded'}
+
+### Sample New Features (showing accomplishments)
+${featureSamples || 'No features recorded'}
+
+### Significant/Major Commits
+${significantSamples || 'No major milestones recorded'}
+
+### Reverted Work (setbacks and pivots)
+${revertSamples || 'No reverts recorded'}
+
+---
+
+## YOUR TASK
+
+Write a comprehensive JSON response with the following structure. Each section should be DETAILED and SUBSTANTIAL:
+
+{
+  "executiveSummary": "A 3-4 paragraph executive summary of the entire year. What was this developer's journey? What defined their year? What should they be most proud of?",
+
+  "story": "A compelling 2-3 paragraph narrative that tells the story of this developer's year as if you were writing a magazine profile.",
+
+  "mainTheme": "One powerful sentence that captures the essence of their year.",
+
+  "yearInNumbers": {
+    "headline": "A catchy headline summarizing the numbers",
+    "insights": ["Array of 5-7 specific, interesting statistical insights derived from the data"]
+  },
+
+  "biggestStruggles": {
+    "overview": "A paragraph analyzing their struggles and challenges based on the fix commits",
+    "challenges": ["Array of 4-6 specific challenges with details about what they fought through"]
+  },
+
+  "proudMoments": {
+    "overview": "A paragraph celebrating their wins and achievements",
+    "achievements": ["Array of 4-6 specific achievements with context about why they matter"]
+  },
+
+  "projectSpotlight": {
+    "overview": "Analysis of their project portfolio - what themes emerge?",
+    "projects": [
+      {
+        "name": "repo name",
+        "narrative": "2-3 sentences about what this project meant to their year",
+        "impact": "One sentence about its significance"
+      }
+    ]
+  },
+
+  "workStyle": {
+    "pace": "steady/burst/sprint/marathon",
+    "approach": "perfectionist/pragmatic/experimental/methodical/etc",
+    "description": "A detailed paragraph about their working style, coding habits, and patterns",
+    "strengths": ["3-4 identified strengths based on data"],
+    "growthAreas": ["2-3 areas for potential growth, framed positively"]
+  },
+
+  "technicalEvolution": {
+    "narrative": "2-3 paragraphs about how their technical work evolved through the year",
+    "keyTransitions": ["List of notable transitions or evolutions in their work"]
+  },
+
+  "topicsExplored": ["Array of 6-10 technical topics/technologies they worked on"],
+
+  "monthByMonth": {
+    "narrative": "A paragraph describing how activity flowed through the year",
+    "peaks": ["2-3 peak periods with context about what was happening"],
+    "valleys": ["1-2 slower periods with possible explanations"]
+  },
+
+  "funFacts": ["Array of 5-7 interesting, specific, and memorable fun facts about their coding year"],
+
+  "quotableCommits": ["3-5 commit messages that stand out as particularly interesting, funny, or telling"],
+
+  "yearAheadOutlook": "A paragraph of encouragement and forward-looking thoughts based on the patterns you see",
+
+  "finalWords": "A powerful closing statement - something memorable they can take away from this year"
+}
+
+IMPORTANT GUIDELINES:
+- Be SPECIFIC - reference actual data, repos, and commit messages
+- Be INSIGHTFUL - don't just restate numbers, interpret them
+- Be NARRATIVE - tell a story, don't just list facts
+- Be SUBSTANTIAL - each section should be meaningful and detailed
+- Be ENCOURAGING but HONEST - celebrate wins, acknowledge challenges
+- Be PERSONAL - write as if you really understand this developer's journey
+
+Return ONLY the JSON, no other text.`;
 
   try {
-    // Use Cloudflare Workers AI for analysis
-    const response = await env.AI.run('@cf/meta/llama-3-8b-instruct', {
+    // Use the larger Llama 3.1 70B model for deeper analysis
+    console.log('[AI Analysis] Calling Llama 3.1 70B for comprehensive analysis...');
+    const response = await env.AI.run('@cf/meta/llama-3.1-70b-instruct', {
       messages: [
-        { role: 'system', content: 'You are an expert at analyzing developer activity and providing meaningful insights. Always respond with valid JSON only.' },
-        { role: 'user', content: prompt }
+        {
+          role: 'system',
+          content: 'You are an expert developer advocate, storyteller, and data analyst. You write compelling, insightful year-in-review narratives that make developers feel seen and celebrated. Your analysis is always data-driven, specific, and substantial. You ALWAYS respond with valid JSON only - no markdown, no code blocks, just pure JSON.'
+        },
+        { role: 'user', content: analysisPrompt }
       ],
-      max_tokens: 1500
+      max_tokens: 8000  // Much larger for comprehensive output
     });
-    
+
+    console.log('[AI Analysis] Response received, parsing...');
+
     // Parse AI response
     let aiInsights;
     try {
       const responseText = response.response || JSON.stringify(response);
-      // Try to extract JSON from response
-      const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+      console.log('[AI Analysis] Response length:', responseText.length);
+
+      // Try to extract JSON from response (handle potential markdown wrapping)
+      let jsonText = responseText;
+
+      // Remove markdown code blocks if present
+      const codeBlockMatch = responseText.match(/```(?:json)?\s*([\s\S]*?)```/);
+      if (codeBlockMatch) {
+        jsonText = codeBlockMatch[1];
+      }
+
+      // Try to extract JSON object
+      const jsonMatch = jsonText.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
         aiInsights = JSON.parse(jsonMatch[0]);
       } else {
-        aiInsights = JSON.parse(responseText);
+        aiInsights = JSON.parse(jsonText);
       }
+
+      console.log('[AI Analysis] Successfully parsed AI response');
+
+      // Ensure backwards compatibility with old format
+      if (!aiInsights.story && aiInsights.executiveSummary) {
+        aiInsights.story = aiInsights.executiveSummary;
+      }
+      if (!aiInsights.biggestStruggles && aiInsights.biggestStruggles?.challenges) {
+        aiInsights.biggestStruggles = aiInsights.biggestStruggles.challenges;
+      }
+      if (!aiInsights.proudMoments && aiInsights.proudMoments?.achievements) {
+        aiInsights.proudMoments = aiInsights.proudMoments.achievements;
+      }
+
+      // Add raw stats for potential frontend use
+      aiInsights._rawStats = {
+        total: stats.total,
+        repos: Object.keys(stats.byRepo).length,
+        fixes: stats.types.fixes.length,
+        features: stats.types.features.length,
+        weekendCommits: stats.weekendCommits,
+        lateNightCommits: stats.lateNightCommits,
+        longestStreak: stats.longestStreak,
+      };
+
     } catch (e) {
-      console.error('Failed to parse AI response:', e);
+      console.error('[AI Analysis] Failed to parse AI response:', e);
+      console.error('[AI Analysis] Raw response:', response.response?.substring(0, 500));
       return null;
     }
-    
+
     return aiInsights;
   } catch (error) {
-    console.error('AI analysis failed:', error);
+    console.error('[AI Analysis] AI analysis failed:', error);
     return null;
   }
 }
 
 /**
  * Analyze commit messages to extract insights (fallback method)
+ * Enhanced to match the comprehensive AI format
  */
 function analyzeCommitMessages(allCommits) {
-  const insights = {
-    themes: [],
-    struggles: [],
-    quickWins: [],
-    majorFeatures: [],
-    commitPatterns: {},
-    workingStyle: {}
-  };
-  
-  // Keywords for different categories
-  const struggleKeywords = ['fix', 'bug', 'issue', 'error', 'problem', 'broken', 'failing', 'debug', 'revert', 'hotfix', 'patch', 'workaround'];
-  const featureKeywords = ['add', 'implement', 'create', 'new', 'feature', 'support', 'enable'];
-  const refactorKeywords = ['refactor', 'cleanup', 'improve', 'optimize', 'reorganize', 'simplify', 'restructure'];
-  const docsKeywords = ['doc', 'readme', 'comment', 'documentation'];
-  const testKeywords = ['test', 'spec', 'coverage'];
-  
-  // Analyze each commit
-  const commitsByType = {
-    fixes: [],
-    features: [],
-    refactors: [],
-    docs: [],
-    tests: [],
-    other: []
-  };
-  
-  const commitsByLength = {
-    quick: [],  // Small commits
-    substantial: []  // Larger, detailed commits
-  };
-  
-  allCommits.forEach(commit => {
-    const msg = commit.message.toLowerCase();
-    const lines = commit.message.split('\n');
-    const firstLine = lines[0];
-    
-    // Categorize by type
-    if (struggleKeywords.some(kw => msg.includes(kw))) {
-      commitsByType.fixes.push({ ...commit, firstLine });
-    } else if (featureKeywords.some(kw => msg.includes(kw))) {
-      commitsByType.features.push({ ...commit, firstLine });
-    } else if (refactorKeywords.some(kw => msg.includes(kw))) {
-      commitsByType.refactors.push({ ...commit, firstLine });
-    } else if (docsKeywords.some(kw => msg.includes(kw))) {
-      commitsByType.docs.push({ ...commit, firstLine });
-    } else if (testKeywords.some(kw => msg.includes(kw))) {
-      commitsByType.tests.push({ ...commit, firstLine });
-    } else {
-      commitsByType.other.push({ ...commit, firstLine });
-    }
-    
-    // Categorize by commit message detail
-    if (lines.length > 2 || commit.message.length > 100) {
-      commitsByLength.substantial.push({ ...commit, firstLine });
-    } else {
-      commitsByLength.quick.push({ ...commit, firstLine });
-    }
-  });
-  
-  // Generate insights
+  // Use the same stats preparation as AI analysis
+  const stats = prepareCommitStats(allCommits);
   const totalCommits = allCommits.length;
-  
-  // Themes - what dominated the year
-  const themes = [];
-  if (commitsByType.features.length / totalCommits > 0.3) {
-    themes.push({
-      title: 'The Builder',
-      description: `You were in creation mode! ${commitsByType.features.length} commits focused on building new features and capabilities.`,
-      icon: '🏗️'
-    });
+  const repoCount = Object.keys(stats.byRepo).length;
+
+  // Sort repos by commit count
+  const topRepos = Object.entries(stats.byRepo)
+    .sort(([,a], [,b]) => b.count - a.count)
+    .slice(0, 10);
+
+  // Sort months
+  const monthlyActivity = Object.entries(stats.byMonth)
+    .sort(([,a], [,b]) => b - a);
+
+  // Determine primary theme
+  let primaryTheme = 'builder';
+  let themeDescription = '';
+  const fixRatio = stats.types.fixes.length / totalCommits;
+  const featureRatio = stats.types.features.length / totalCommits;
+  const refactorRatio = stats.types.refactors.length / totalCommits;
+
+  if (featureRatio > 0.3) {
+    primaryTheme = 'builder';
+    themeDescription = `You were in creation mode! ${stats.types.features.length} commits focused on building new features across ${repoCount} repositories.`;
+  } else if (fixRatio > 0.25) {
+    primaryTheme = 'problem-solver';
+    themeDescription = `You were the problem solver! ${stats.types.fixes.length} commits dedicated to fixing issues and making things work.`;
+  } else if (refactorRatio > 0.15) {
+    primaryTheme = 'perfectionist';
+    themeDescription = `Quality was your focus! ${stats.types.refactors.length} commits improving and refactoring code to be better.`;
+  } else {
+    themeDescription = `You made ${totalCommits} commits across ${repoCount} repositories, building and refining your craft.`;
   }
-  
-  if (commitsByType.fixes.length / totalCommits > 0.25) {
-    themes.push({
-      title: 'The Problem Solver',
-      description: `${commitsByType.fixes.length} commits dedicated to fixing issues and debugging. You fought through the tough problems!`,
-      icon: '🔧'
-    });
+
+  // Generate executive summary
+  const executiveSummary = `This year, you made ${totalCommits.toLocaleString()} commits across ${repoCount} repositories. That's an impressive body of work that shows dedication to your craft.
+
+Your most active project was ${topRepos[0]?.[0] || 'your main repository'} with ${topRepos[0]?.[1]?.count || 0} commits. You spent ${Math.round(stats.weekendCommits/totalCommits*100)}% of your commits on weekends and ${Math.round(stats.lateNightCommits/totalCommits*100)}% during late night hours (10PM-4AM), showing your commitment to shipping code.
+
+${monthlyActivity[0] ? `Your peak month was ${monthlyActivity[0][0]} with ${monthlyActivity[0][1]} commits.` : ''} You maintained a longest streak of ${stats.longestStreak} consecutive days of coding.`;
+
+  // Generate story
+  const story = `${themeDescription}
+
+With ${stats.types.features.length} feature commits and ${stats.types.fixes.length} bug fixes, you balanced building new capabilities with maintaining stability. Your work spanned ${repoCount} different repositories, demonstrating versatility and a willingness to contribute broadly.
+
+${stats.longestStreak > 7 ? `A ${stats.longestStreak}-day coding streak shows remarkable consistency.` : `You coded consistently throughout the year.`} Whether it was early morning or late night, you showed up and shipped code.`;
+
+  // Year in numbers insights
+  const yearInNumbersInsights = [
+    `${totalCommits.toLocaleString()} total commits - that's roughly ${Math.round(totalCommits/365)} commits per day on average`,
+    `${repoCount} repositories touched - showing breadth of contribution`,
+    `${stats.types.features.length} new features implemented`,
+    `${stats.types.fixes.length} bugs squashed and issues resolved`,
+    `${stats.weekendCommits} weekend commits (${Math.round(stats.weekendCommits/totalCommits*100)}% of total)`,
+    `${stats.lateNightCommits} late night commits showing dedication`,
+    `${stats.longestStreak} day longest coding streak`
+  ];
+
+  // Challenges
+  const challengesList = stats.types.fixes.slice(0, 6).map(c => c.message);
+  if (challengesList.length === 0) {
+    challengesList.push('Maintaining code quality across multiple projects');
+    challengesList.push('Balancing new features with bug fixes');
   }
-  
-  if (commitsByType.refactors.length / totalCommits > 0.15) {
-    themes.push({
-      title: 'The Perfectionist',
-      description: `${commitsByType.refactors.length} commits improving and refactoring code. Quality matters to you!`,
-      icon: '✨'
-    });
+
+  // Achievements
+  const achievementsList = stats.types.features.slice(0, 6).map(c => c.message);
+  if (achievementsList.length === 0) {
+    achievementsList.push('Consistent contribution throughout the year');
+    achievementsList.push('Building and maintaining multiple repositories');
   }
-  
-  if (commitsByType.tests.length / totalCommits > 0.1) {
-    themes.push({
-      title: 'The Quality Guardian',
-      description: `${commitsByType.tests.length} commits adding tests. You believe in robust, tested code!`,
-      icon: '🛡️'
-    });
-  }
-  
-  // Struggles - commits that show challenges
-  const struggles = commitsByType.fixes
-    .filter(c => {
-      const msg = c.message.toLowerCase();
-      return msg.includes('finally') || msg.includes('fixed') || msg.includes('resolved') || 
-             msg.includes('workaround') || msg.includes('attempt') || msg.includes('try');
-    })
-    .slice(0, 5)
-    .map(c => ({
-      message: c.firstLine,
-      repo: c.repo,
-      date: c.date
-    }));
-  
-  // Quick wins - short, impactful commits
-  const quickWins = commitsByLength.quick
-    .filter(c => commitsByType.features.includes(c))
-    .slice(0, 5)
-    .map(c => ({
-      message: c.firstLine,
-      repo: c.repo,
-      date: c.date
-    }));
-  
-  // Major features - detailed commits about new features
-  const majorFeatures = commitsByLength.substantial
-    .filter(c => commitsByType.features.includes(c))
-    .slice(0, 5)
-    .map(c => ({
-      message: c.firstLine,
-      repo: c.repo,
-      date: c.date,
-      details: c.message.split('\n').slice(1).join('\n').trim()
-    }));
-  
-  // Working style
-  const workingStyle = {
-    commitFrequency: totalCommits > 500 ? 'Very Active' : totalCommits > 200 ? 'Active' : 'Steady',
-    detailLevel: commitsByLength.substantial.length / totalCommits > 0.3 ? 'Detailed' : 'Concise',
-    focusArea: Object.entries(commitsByType)
-      .sort(([, a], [, b]) => b.length - a.length)[0][0]
-  };
-  
-  // Most active months
-  const monthlyCommits = {};
-  allCommits.forEach(commit => {
-    const month = new Date(commit.date).toLocaleString('default', { month: 'long' });
-    monthlyCommits[month] = (monthlyCommits[month] || 0) + 1;
-  });
-  
-  const topMonths = Object.entries(monthlyCommits)
-    .sort(([, a], [, b]) => b - a)
-    .slice(0, 3)
-    .map(([month, count]) => ({ month, commits: count }));
-  
-  // Generate story and main theme
-  const story = themes.length > 0 
-    ? `This year, you were ${themes[0].title.toLowerCase()}. ${themes[0].description}`
-    : `This year, you made ${totalCommits} commits, building and refining your craft through consistent work.`;
-  
-  const mainTheme = themes.length > 0
-    ? themes[0].description
-    : "Steady progress through dedication and focus";
-  
-  // Format struggles for UI
-  const biggestStruggles = struggles.slice(0, 3).map(s => s.message || "Debugging complex issues and finding solutions");
-  
-  // Format proud moments from features
-  const proudMoments = majorFeatures.slice(0, 3).map(m => m.message || "Shipped meaningful features");
-  
-  // Topics from commit keywords
-  const topicsExplored = [];
-  if (commitsByType.features.length > 0) topicsExplored.push("Feature Development");
-  if (commitsByType.fixes.length > 0) topicsExplored.push("Bug Fixing");
-  if (commitsByType.refactors.length > 0) topicsExplored.push("Code Refactoring");
-  if (commitsByType.tests.length > 0) topicsExplored.push("Testing");
-  if (commitsByType.docs.length > 0) topicsExplored.push("Documentation");
-  
-  // Fun fact from monthly data
-  const funFact = topMonths.length > 0
-    ? `Your most productive month was ${topMonths[0].month} with ${topMonths[0].commits} commits!`
-    : `You maintained a ${workingStyle.commitFrequency.toLowerCase()} pace throughout the year.`;
-  
-  // Evolution insight
-  const evolutionInsight = commitsByLength.substantial.length > commitsByLength.quick.length
-    ? "You evolved toward more detailed, thoughtful commits as the year progressed."
-    : "You maintained a consistent, efficient commit style throughout the year.";
-  
+
+  // Project spotlight
+  const projectSpotlight = topRepos.slice(0, 5).map(([name, data]) => ({
+    name,
+    narrative: `You made ${data.count} commits to this project, making it one of your primary focuses this year.`,
+    impact: `${Math.round(data.count/totalCommits*100)}% of your total commits`
+  }));
+
+  // Work style
+  const pace = totalCommits > 1000 ? 'marathon' : totalCommits > 500 ? 'sprint' : totalCommits > 200 ? 'steady' : 'focused';
+  const approach = stats.messageStats.detailed > stats.messageStats.oneLiner ? 'methodical' : 'pragmatic';
+
+  // Month by month
+  const peakMonths = monthlyActivity.slice(0, 3).map(([month, count]) => `${month}: ${count} commits`);
+  const slowMonths = monthlyActivity.slice(-2).map(([month, count]) => `${month}: ${count} commits`);
+
+  // Fun facts
+  const funFacts = [
+    `Your most productive month was ${monthlyActivity[0]?.[0] || 'consistent'} with ${monthlyActivity[0]?.[1] || 0} commits`,
+    `You committed ${stats.weekendCommits} times on weekends - that's dedication!`,
+    `${stats.lateNightCommits} commits were made during late night hours (10PM-4AM)`,
+    `Your average commit message was ${stats.messageStats.avgLength} characters long`,
+    `${stats.messageStats.detailed} commits had detailed multi-line messages`,
+    stats.revertedCommits.length > 0 ? `You reverted ${stats.revertedCommits.length} commits - learning from mistakes!` : 'You rarely had to revert commits - clean coding!'
+  ];
+
+  // Quotable commits
+  const quotableCommits = [
+    ...stats.significantCommits.slice(0, 3).map(c => c.message),
+    ...stats.types.features.slice(0, 2).map(c => c.message)
+  ].slice(0, 5);
+
   return {
+    executiveSummary,
     story,
-    mainTheme,
-    biggestStruggles: biggestStruggles.length > 0 ? biggestStruggles : ["Navigating challenges and finding solutions"],
-    proudMoments: proudMoments.length > 0 ? proudMoments : ["Making progress and shipping code"],
-    workStyle: {
-      pace: workingStyle.commitFrequency.toLowerCase().replace(' ', '-'),
-      approach: workingStyle.detailLevel.toLowerCase(),
-      description: `You're a ${workingStyle.detailLevel.toLowerCase()} developer with a ${workingStyle.commitFrequency.toLowerCase()} pace.`
+    mainTheme: themeDescription,
+    yearInNumbers: {
+      headline: `${totalCommits.toLocaleString()} Commits Across ${repoCount} Repos`,
+      insights: yearInNumbersInsights
     },
-    topicsExplored: topicsExplored.length > 0 ? topicsExplored : ["Software Development"],
-    evolutionInsight,
-    funFact
+    biggestStruggles: {
+      overview: `You tackled ${stats.types.fixes.length} bug fixes and issues this year. Every fix is a lesson learned and a step toward more robust code.`,
+      challenges: challengesList
+    },
+    proudMoments: {
+      overview: `You shipped ${stats.types.features.length} new features and improvements. Each one represents value delivered and problems solved.`,
+      achievements: achievementsList
+    },
+    projectSpotlight: {
+      overview: `Your work spanned ${repoCount} repositories, with concentrated effort on your top projects.`,
+      projects: projectSpotlight
+    },
+    workStyle: {
+      pace,
+      approach,
+      description: `You're a ${approach} developer who works at a ${pace} pace. With ${totalCommits} commits, you've shown ${pace === 'marathon' ? 'exceptional endurance' : pace === 'sprint' ? 'high intensity bursts' : 'consistent dedication'}. Your ${stats.messageStats.detailed > stats.messageStats.oneLiner ? 'detailed commit messages show attention to documentation' : 'concise commit style shows efficiency'}.`,
+      strengths: [
+        `Consistent output: ${totalCommits} commits shows reliability`,
+        `Versatility: contributed to ${repoCount} different repositories`,
+        featureRatio > 0.2 ? 'Strong feature development skills' : 'Excellent maintenance and stability focus',
+        stats.longestStreak > 7 ? `Dedication: ${stats.longestStreak}-day coding streak` : 'Balanced work-life approach'
+      ],
+      growthAreas: [
+        stats.types.tests.length < totalCommits * 0.1 ? 'Could explore more test coverage' : 'Testing is already a strength',
+        stats.types.docs.length < totalCommits * 0.05 ? 'Documentation could be expanded' : 'Documentation is solid'
+      ]
+    },
+    technicalEvolution: {
+      narrative: `Throughout the year, you evolved your approach to development. Your commit patterns show ${stats.messageStats.detailed > stats.messageStats.oneLiner ? 'a preference for detailed, documented changes' : 'an efficient, results-focused style'}.
+
+Working across ${repoCount} repositories required adaptability and context-switching skills. Your ${stats.types.refactors.length} refactoring commits demonstrate a commitment to code quality and continuous improvement.`,
+      keyTransitions: [
+        `Touched ${repoCount} different repositories`,
+        `${stats.types.refactors.length} refactoring commits for code improvement`,
+        `Maintained ${stats.longestStreak}-day coding consistency`
+      ]
+    },
+    topicsExplored: [
+      'Feature Development',
+      'Bug Fixing',
+      stats.types.refactors.length > 0 ? 'Code Refactoring' : null,
+      stats.types.tests.length > 0 ? 'Testing' : null,
+      stats.types.docs.length > 0 ? 'Documentation' : null,
+      'Code Maintenance',
+      'Repository Management'
+    ].filter(Boolean),
+    monthByMonth: {
+      narrative: `Your activity fluctuated throughout the year, with ${monthlyActivity[0]?.[0] || 'various months'} being your most productive period.`,
+      peaks: peakMonths,
+      valleys: slowMonths
+    },
+    funFacts,
+    quotableCommits: quotableCommits.length > 0 ? quotableCommits : ['Building software, one commit at a time'],
+    yearAheadOutlook: `Based on your ${totalCommits} commits this year, you've built strong momentum. Consider focusing on ${stats.types.tests.length < 50 ? 'expanding test coverage' : 'maintaining your testing discipline'} and ${stats.types.docs.length < 20 ? 'adding more documentation' : 'continuing your documentation habits'}. Your versatility across ${repoCount} repos is a strength to build on.`,
+    finalWords: `${totalCommits.toLocaleString()} commits. ${repoCount} repositories. One dedicated developer. Keep shipping.`,
+    _rawStats: {
+      total: totalCommits,
+      repos: repoCount,
+      fixes: stats.types.fixes.length,
+      features: stats.types.features.length,
+      weekendCommits: stats.weekendCommits,
+      lateNightCommits: stats.lateNightCommits,
+      longestStreak: stats.longestStreak,
+    }
   };
 }
 
