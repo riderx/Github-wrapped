@@ -27,11 +27,16 @@ jobs:
       - name: Build frontend
         run: npm run build
       
+      - name: Set build timestamp
+        id: timestamp
+        run: echo "BUILD_TIMESTAMP=$(date +%s)" >> $GITHUB_OUTPUT
+
       - name: Deploy Worker with Assets
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy --define BUILD_TIMESTAMP:\"${{ steps.timestamp.outputs.BUILD_TIMESTAMP }}\"
           secrets: |
             GITHUB_TOKEN
             GITHUB_CLIENT_ID
