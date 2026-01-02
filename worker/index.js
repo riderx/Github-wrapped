@@ -626,17 +626,27 @@ async function getUserEvents(username, token) {
  * This properly counts ALL PRs for the year, unlike the Events API which only shows ~90 days
  */
 async function getUserPullRequestCount(username, year, token) {
-  try {
-    // Search for PRs authored by the user in the given year
-    const query = `author:${username} type:pr created:${year}-01-01..${year}-12-31`;
-    const url = `https://api.github.com/search/issues?q=${encodeURIComponent(query)}&per_page=1`;
-    const result = await fetchGitHub(url, token);
-    console.log(`[PR Count] User ${username} has ${result.total_count} PRs in ${year}`);
-    return result.total_count || 0;
-  } catch (error) {
-    console.error(`Error fetching PR count for ${username}:`, error);
-    return 0;
+  const maxRetries = 3;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      // Search for PRs authored by the user in the given year
+      const query = `author:${username} type:pr created:${year}-01-01..${year}-12-31`;
+      const url = `https://api.github.com/search/issues?q=${encodeURIComponent(query)}&per_page=1`;
+      const result = await fetchGitHub(url, token);
+      const count = result.total_count || 0;
+      console.log(`[PR Count] User ${username} has ${count} PRs in ${year}`);
+      return count;
+    } catch (error) {
+      console.error(`[PR Count] Attempt ${attempt}/${maxRetries} failed for ${username}:`, error.message);
+      if (attempt === maxRetries) {
+        console.error(`[PR Count] All retries exhausted for ${username}, returning 0`);
+        return 0;
+      }
+      // Wait before retry (exponential backoff)
+      await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+    }
   }
+  return 0;
 }
 
 /**
@@ -644,34 +654,54 @@ async function getUserPullRequestCount(username, year, token) {
  * This properly counts ALL issues for the year, unlike the Events API which only shows ~90 days
  */
 async function getUserIssueCount(username, year, token) {
-  try {
-    // Search for issues authored by the user in the given year (excluding PRs)
-    const query = `author:${username} type:issue created:${year}-01-01..${year}-12-31`;
-    const url = `https://api.github.com/search/issues?q=${encodeURIComponent(query)}&per_page=1`;
-    const result = await fetchGitHub(url, token);
-    console.log(`[Issue Count] User ${username} has ${result.total_count} issues in ${year}`);
-    return result.total_count || 0;
-  } catch (error) {
-    console.error(`Error fetching issue count for ${username}:`, error);
-    return 0;
+  const maxRetries = 3;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      // Search for issues authored by the user in the given year (excluding PRs)
+      const query = `author:${username} type:issue created:${year}-01-01..${year}-12-31`;
+      const url = `https://api.github.com/search/issues?q=${encodeURIComponent(query)}&per_page=1`;
+      const result = await fetchGitHub(url, token);
+      const count = result.total_count || 0;
+      console.log(`[Issue Count] User ${username} has ${count} issues in ${year}`);
+      return count;
+    } catch (error) {
+      console.error(`[Issue Count] Attempt ${attempt}/${maxRetries} failed for ${username}:`, error.message);
+      if (attempt === maxRetries) {
+        console.error(`[Issue Count] All retries exhausted for ${username}, returning 0`);
+        return 0;
+      }
+      // Wait before retry (exponential backoff)
+      await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+    }
   }
+  return 0;
 }
 
 /**
  * Get user's PR review count for a specific year using GitHub Search API
  */
 async function getUserReviewCount(username, year, token) {
-  try {
-    // Search for PRs reviewed by the user in the given year
-    const query = `reviewed-by:${username} type:pr created:${year}-01-01..${year}-12-31`;
-    const url = `https://api.github.com/search/issues?q=${encodeURIComponent(query)}&per_page=1`;
-    const result = await fetchGitHub(url, token);
-    console.log(`[Review Count] User ${username} reviewed ${result.total_count} PRs in ${year}`);
-    return result.total_count || 0;
-  } catch (error) {
-    console.error(`Error fetching review count for ${username}:`, error);
-    return 0;
+  const maxRetries = 3;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      // Search for PRs reviewed by the user in the given year
+      const query = `reviewed-by:${username} type:pr created:${year}-01-01..${year}-12-31`;
+      const url = `https://api.github.com/search/issues?q=${encodeURIComponent(query)}&per_page=1`;
+      const result = await fetchGitHub(url, token);
+      const count = result.total_count || 0;
+      console.log(`[Review Count] User ${username} reviewed ${count} PRs in ${year}`);
+      return count;
+    } catch (error) {
+      console.error(`[Review Count] Attempt ${attempt}/${maxRetries} failed for ${username}:`, error.message);
+      if (attempt === maxRetries) {
+        console.error(`[Review Count] All retries exhausted for ${username}, returning 0`);
+        return 0;
+      }
+      // Wait before retry (exponential backoff)
+      await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+    }
   }
+  return 0;
 }
 
 /**
