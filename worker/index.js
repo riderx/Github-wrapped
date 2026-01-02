@@ -3,7 +3,31 @@
  * Handles GitHub API requests with caching support
  */
 
-// CORS headers
+/**
+ * Get CORS headers for a request
+ */
+function getCorsHeaders(request) {
+  const origin = request.headers.get('Origin') || '*';
+  
+  // For credentials to work, we need to set specific origin
+  if (origin !== '*') {
+    return {
+      'Access-Control-Allow-Origin': origin,
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Cookie',
+      'Access-Control-Allow-Credentials': 'true',
+    };
+  }
+  
+  // Fallback for non-credentialed requests
+  return {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+  };
+}
+
+// Legacy CORS headers for backward compatibility
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
@@ -12,6 +36,12 @@ const corsHeaders = {
 
 // Cache TTL: 1 hour
 const CACHE_TTL = 3600;
+
+// Session cookie name
+const SESSION_COOKIE_NAME = 'gh_wrapped_session';
+
+// Session expiry: 7 days
+const SESSION_EXPIRY = 7 * 24 * 60 * 60;
 
 // API limits to avoid rate limiting
 const MAX_REPO_PAGES = 10; // Maximum number of pages to fetch (100 repos per page)
@@ -604,6 +634,327 @@ async function generateWrapped(username, year, token, env) {
 }
 
 /**
+ * OAuth Helper Functions
+ */
+
+/**
+ * Generate a random state for OAuth flow
+ */
+function generateState() {
+  const array = new Uint8Array(32);
+  crypto.getRandomValues(array);
+  return Array.from(array, byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * Create session cookie
+ * 
+ * Note: For enhanced security in production, consider using a session store (like Cloudflare KV)
+ * with a session ID instead of storing the GitHub token directly in the cookie.
+ * This would provide additional protection against cookie theft attacks.
+ * 
+ * Current implementation stores the token directly for simplicity and to avoid
+ * additional infrastructure dependencies (KV storage).
+ */
+function createSessionCookie(token, maxAge = SESSION_EXPIRY) {
+  const expires = new Date(Date.now() + maxAge * 1000).toUTCString();
+  return `${SESSION_COOKIE_NAME}=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAge}; Expires=${expires}`;
+}
+
+/**
+ * Parse cookies from request
+ */
+function parseCookies(request) {
+  const cookieHeader = request.headers.get('Cookie');
+  if (!cookieHeader) return {};
+  
+  const cookies = {};
+  cookieHeader.split(';').forEach(cookie => {
+    const [name, value] = cookie.trim().split('=');
+    if (name && value) {
+      cookies[name] = value;
+    }
+  });
+  return cookies;
+}
+
+/**
+ * Get session token from cookie
+ */
+function getSessionToken(request) {
+  const cookies = parseCookies(request);
+  return cookies[SESSION_COOKIE_NAME];
+}
+
+/**
+ * Get OAuth redirect URI
+ */
+function getOAuthRedirectUri(env) {
+  if (!env.OAUTH_REDIRECT_URI && !env.APP_URL) {
+    throw new Error('Either OAUTH_REDIRECT_URI or APP_URL must be configured');
+  }
+  return env.OAUTH_REDIRECT_URI || `${env.APP_URL}/api/oauth/callback`;
+}
+
+/**
+ * Store state in a cookie for CSRF protection
+ */
+function createStateCookie(state) {
+  const expires = new Date(Date.now() + 10 * 60 * 1000).toUTCString(); // 10 minutes
+  return `oauth_state=${state}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=600; Expires=${expires}`;
+}
+
+/**
+ * Get and validate OAuth state from cookie
+ */
+function validateState(request, providedState) {
+  const cookies = parseCookies(request);
+  const storedState = cookies['oauth_state'];
+  
+  if (!storedState || !providedState) {
+    return false;
+  }
+  
+  return storedState === providedState;
+}
+
+/**
+ * Clear OAuth state cookie
+ */
+function clearStateCookie() {
+  return `oauth_state=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
+}
+
+/**
+ * Handle OAuth login initiation
+ */
+function handleOAuthLogin(env, corsHeaders) {
+  const clientId = env.GITHUB_CLIENT_ID;
+  
+  if (!clientId) {
+    return new Response(
+      JSON.stringify({ error: 'OAuth not configured. Please set GITHUB_CLIENT_ID.' }),
+      { 
+        status: 500,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      }
+    );
+  }
+  
+  const state = generateState();
+  const redirectUri = getOAuthRedirectUri(env);
+  const stateCookie = createStateCookie(state);
+  
+  // GitHub OAuth authorization URL
+  const authUrl = new URL('https://github.com/login/oauth/authorize');
+  authUrl.searchParams.set('client_id', clientId);
+  authUrl.searchParams.set('redirect_uri', redirectUri);
+  authUrl.searchParams.set('scope', 'read:user');
+  authUrl.searchParams.set('state', state);
+  
+  // Return the authorization URL and state
+  return new Response(
+    JSON.stringify({ 
+      authUrl: authUrl.toString(),
+      state
+    }),
+    {
+      headers: {
+        ...corsHeaders,
+        'Content-Type': 'application/json',
+        'Set-Cookie': stateCookie,
+      }
+    }
+  );
+}
+
+/**
+ * Handle OAuth callback
+ */
+async function handleOAuthCallback(request, env, corsHeaders) {
+  const url = new URL(request.url);
+  const code = url.searchParams.get('code');
+  const state = url.searchParams.get('state');
+  
+  // Validate state parameter for CSRF protection
+  if (!validateState(request, state)) {
+    const clearState = clearStateCookie();
+    return new Response(
+      JSON.stringify({ error: 'Invalid state parameter. Possible CSRF attack.' }),
+      { 
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json', 'Set-Cookie': clearState }
+      }
+    );
+  }
+  
+  if (!code) {
+    return new Response(
+      JSON.stringify({ error: 'Missing authorization code' }),
+      { 
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      }
+    );
+  }
+  
+  const clientId = env.GITHUB_CLIENT_ID;
+  const clientSecret = env.GITHUB_CLIENT_SECRET;
+  const redirectUri = getOAuthRedirectUri(env);
+  
+  if (!clientId || !clientSecret) {
+    const clearState = clearStateCookie();
+    return new Response(
+      JSON.stringify({ error: 'OAuth not configured' }),
+      { 
+        status: 500,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json', 'Set-Cookie': clearState }
+      }
+    );
+  }
+  
+  try {
+    // Exchange code for access token
+    const tokenResponse = await fetch('https://github.com/login/oauth/access_token', {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        client_id: clientId,
+        client_secret: clientSecret,
+        code,
+        redirect_uri: redirectUri,
+      }),
+    });
+    
+    const tokenData = await tokenResponse.json();
+    
+    if (tokenData.error) {
+      console.error('[OAuth] Error exchanging code:', tokenData);
+      const clearState = clearStateCookie();
+      return new Response(
+        JSON.stringify({ error: tokenData.error_description || tokenData.error }),
+        { 
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json', 'Set-Cookie': clearState }
+        }
+      );
+    }
+    
+    const accessToken = tokenData.access_token;
+    
+    // Get user info to verify token
+    const userInfo = await fetchGitHub('https://api.github.com/user', accessToken);
+    
+    // Create session cookie with the access token and clear state cookie
+    const sessionCookie = createSessionCookie(accessToken);
+    const clearState = clearStateCookie();
+    
+    // Redirect back to the app with success
+    const appUrl = env.APP_URL || url.origin;
+    const redirectUrl = new URL(appUrl);
+    redirectUrl.searchParams.set('oauth', 'success');
+    redirectUrl.searchParams.set('username', userInfo.login);
+    
+    // Use Headers object to set multiple Set-Cookie headers
+    const headers = new Headers();
+    headers.set('Location', redirectUrl.toString());
+    headers.append('Set-Cookie', sessionCookie);
+    headers.append('Set-Cookie', clearState);
+    
+    return new Response(null, {
+      status: 302,
+      headers: headers,
+    });
+  } catch (error) {
+    console.error('[OAuth] Callback error:', error);
+    const clearState = clearStateCookie();
+    return new Response(
+      JSON.stringify({ error: 'OAuth authentication failed', details: error.message }),
+      { 
+        status: 500,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json', 'Set-Cookie': clearState }
+      }
+    );
+  }
+}
+
+/**
+ * Handle logout
+ */
+function handleLogout(corsHeaders) {
+  // Clear session cookie
+  const clearCookie = `${SESSION_COOKIE_NAME}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
+  
+  return new Response(
+    JSON.stringify({ success: true, message: 'Logged out successfully' }),
+    {
+      headers: {
+        ...corsHeaders,
+        'Content-Type': 'application/json',
+        'Set-Cookie': clearCookie,
+      }
+    }
+  );
+}
+
+/**
+ * Get current user info from session
+ */
+async function handleUserInfo(request, corsHeaders) {
+  const token = getSessionToken(request);
+  
+  if (!token) {
+    return new Response(
+      JSON.stringify({ authenticated: false }),
+      {
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'application/json',
+        }
+      }
+    );
+  }
+  
+  try {
+    const userInfo = await fetchGitHub('https://api.github.com/user', token);
+    
+    return new Response(
+      JSON.stringify({
+        authenticated: true,
+        user: {
+          login: userInfo.login,
+          name: userInfo.name,
+          avatar: userInfo.avatar_url,
+        }
+      }),
+      {
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'application/json',
+        }
+      }
+    );
+  } catch (error) {
+    // Token is invalid, clear it
+    const clearCookie = `${SESSION_COOKIE_NAME}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
+    
+    return new Response(
+      JSON.stringify({ authenticated: false, error: 'Invalid session' }),
+      {
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'application/json',
+          'Set-Cookie': clearCookie,
+        }
+      }
+    );
+  }
+}
+
+/**
  * Create a request for index.html (for SPA routing)
  */
 function createIndexRequest(originalRequest) {
@@ -617,6 +968,7 @@ function createIndexRequest(originalRequest) {
  */
 async function handleRequest(request, env, ctx) {
   const url = new URL(request.url);
+  const corsHeaders = getCorsHeaders(request);
   
   // Handle CORS preflight
   if (request.method === 'OPTIONS') {
@@ -626,31 +978,61 @@ async function handleRequest(request, env, ctx) {
   // Parse path
   const path = url.pathname;
   
+  // OAuth routes
+  if (path === '/api/oauth/login') {
+    return handleOAuthLogin(env, corsHeaders);
+  }
+  
+  if (path === '/api/oauth/callback') {
+    return await handleOAuthCallback(request, env, corsHeaders);
+  }
+  
+  if (path === '/api/oauth/logout') {
+    return handleLogout(corsHeaders);
+  }
+  
+  if (path === '/api/user') {
+    return await handleUserInfo(request, corsHeaders);
+  }
+  
   // API routes
   if (path === '/api/wrapped') {
     // Get query parameters
-    const username = url.searchParams.get('username');
+    let username = url.searchParams.get('username');
     const year = url.searchParams.get('year') || '2025';
     const tokenFromQuery = url.searchParams.get('token') || null;
     
-    // Support GitHub token from environment variable (for GitHub Actions)
-    // Priority: query parameter > environment variable
-    const token = tokenFromQuery || env.GITHUB_TOKEN || null;
+    // Get token from session cookie
+    const sessionToken = getSessionToken(request);
     
-    if (token) {
-      console.log('[API] Using GitHub token for authentication');
-    } else {
-      console.log('[API] No GitHub token provided - using unauthenticated requests (rate limited)');
+    // Priority: query parameter > session token > environment variable
+    const token = tokenFromQuery || sessionToken || env.GITHUB_TOKEN || null;
+    
+    // If no username provided but user is authenticated, use their username
+    if (!username && sessionToken) {
+      try {
+        const userInfo = await fetchGitHub('https://api.github.com/user', sessionToken);
+        username = userInfo.login;
+        console.log(`[API] No username provided, using authenticated user: ${username}`);
+      } catch (error) {
+        console.error('[API] Failed to get authenticated user:', error);
+      }
     }
     
     if (!username) {
       return new Response(
-        JSON.stringify({ error: 'Username is required' }),
+        JSON.stringify({ error: 'Username is required. Please sign in to view your own stats or provide a username to view someone else\'s.' }),
         { 
           status: 400, 
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         }
       );
+    }
+    
+    if (token) {
+      console.log('[API] Using GitHub token for authentication');
+    } else {
+      console.log('[API] No GitHub token provided - using unauthenticated requests (rate limited)');
     }
     
     console.log(`[API] Request for username: ${username}, year: ${year}`);
