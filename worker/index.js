@@ -769,31 +769,40 @@ function prepareCommitStats(allCommits) {
   stats.messageStats.avgLength = Math.round(totalMessageLength / allCommits.length);
 
   // Calculate longest streak with start/end dates
+  // First, deduplicate dates to unique days (not individual commits)
   if (dates.length > 0) {
-    dates.sort((a, b) => a - b);
+    const uniqueDaysSet = new Set();
+    dates.forEach(date => {
+      uniqueDaysSet.add(date.toISOString().split('T')[0]);
+    });
+    const uniqueDays = Array.from(uniqueDaysSet).sort();
+
     let currentStreak = 1;
     let maxStreak = 1;
-    let streakStart = dates[0];
-    let maxStreakStart = dates[0];
-    let maxStreakEnd = dates[0];
+    let streakStartIdx = 0;
+    let maxStreakStartIdx = 0;
+    let maxStreakEndIdx = 0;
 
-    for (let i = 1; i < dates.length; i++) {
-      const diffDays = Math.floor((dates[i] - dates[i-1]) / (1000 * 60 * 60 * 24));
-      if (diffDays <= 1) {
+    for (let i = 1; i < uniqueDays.length; i++) {
+      const prevDate = new Date(uniqueDays[i - 1]);
+      const currDate = new Date(uniqueDays[i]);
+      const diffDays = Math.round((currDate - prevDate) / (1000 * 60 * 60 * 24));
+
+      if (diffDays === 1) {
         currentStreak++;
         if (currentStreak > maxStreak) {
           maxStreak = currentStreak;
-          maxStreakStart = streakStart;
-          maxStreakEnd = dates[i];
+          maxStreakStartIdx = streakStartIdx;
+          maxStreakEndIdx = i;
         }
       } else {
         currentStreak = 1;
-        streakStart = dates[i];
+        streakStartIdx = i;
       }
     }
     stats.longestStreak = maxStreak;
-    stats.longestStreakStart = maxStreakStart.toISOString().split('T')[0];
-    stats.longestStreakEnd = maxStreakEnd.toISOString().split('T')[0];
+    stats.longestStreakStart = uniqueDays[maxStreakStartIdx];
+    stats.longestStreakEnd = uniqueDays[maxStreakEndIdx];
   }
 
   return stats;
