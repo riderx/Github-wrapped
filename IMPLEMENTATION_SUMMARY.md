@@ -128,7 +128,6 @@ See `OAUTH_SETUP.md` for detailed instructions.
 ### For Administrators
 
 - Must configure OAuth before deploying
-- Existing `GITHUB_TOKEN` environment variable still supported
 - No database migration required
 
 ## Rollback Plan

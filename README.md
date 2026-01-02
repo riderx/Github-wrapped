@@ -13,7 +13,6 @@ A beautiful web application that creates a "Spotify Wrapped" style visualization
 - 🎨 Beautiful, responsive UI with animations
 - 📱 Mobile-friendly design
 - 🌿 Retrieves commits from default branch (main/master) only
-- 🔐 Environment variable support for GitHub token (GITHUB_TOKEN)
 
 **What You'll See:**
 - Total commits, pull requests, issues, and code reviews
@@ -121,14 +120,6 @@ The app now supports GitHub OAuth login for a seamless experience:
 
    📖 **For detailed OAuth setup instructions, see [OAUTH_SETUP.md](./OAUTH_SETUP.md)**
 
-**For GitHub Actions / Automated Deployment:**
-
-The GitHub token is automatically configured during deployment:
-- When deploying via GitHub Actions, add `GH_API_TOKEN` secret to your repository
-- The deployment workflow automatically passes this as `GITHUB_TOKEN` to the Cloudflare Worker
-- This enables the worker to make authenticated API requests without rate limits
-- See the [Setup GitHub Actions Deployment](#setup-github-actions-deployment) section for configuration details
-
 ## Deployment
 
 ### Local Testing with Wrangler (Recommended Before Deployment)
@@ -169,14 +160,10 @@ The Cloudflare Worker:
    - Add the following secrets:
      - `CLOUDFLARE_API_TOKEN`: Your Cloudflare API token
      - `CLOUDFLARE_ACCOUNT_ID`: Your Cloudflare account ID
-     - `GH_API_TOKEN` (optional): Your GitHub Personal Access Token with `repo` scope
-       - This token will be automatically passed to the Cloudflare Worker as `GITHUB_TOKEN`
-       - Used to avoid GitHub API rate limits when fetching commit data
-       - Without this, the worker will use unauthenticated requests (limited to 60 requests/hour)
-     - `G_CLIENT_ID`: Your GitHub OAuth App Client ID (for OAuth login feature)
-     - `G_CLIENT_SECRET`: Your GitHub OAuth App Client Secret (for OAuth login feature)
+     - `G_CLIENT_ID`: Your GitHub OAuth App Client ID (required for OAuth login)
+     - `G_CLIENT_SECRET`: Your GitHub OAuth App Client Secret (required for OAuth login)
      - `APP_URL`: Your deployed app URL (e.g., `https://github-wrapped.your-subdomain.workers.dev`)
-   
+
    > **Note**: GitHub Actions doesn't allow secrets starting with `GITHUB_`, so OAuth secrets use `G_CLIENT_ID` and `G_CLIENT_SECRET`.
 
 3. **Deploy:**
@@ -316,17 +303,12 @@ Gets the current authenticated user's information.
 Fetches GitHub wrapped data for a user.
 
 **Query Parameters:**
-- `username` (required): GitHub username or organization
+- `username` (optional): GitHub username or organization (auto-detected from OAuth session if not provided)
 - `year` (optional): Year to generate wrapped for (default: 2025)
-- `token` (optional): GitHub API token for private repo access (deprecated, use OAuth login instead)
 
 **Authentication:**
-- If user is authenticated via OAuth, their token is automatically used
-- Fallback to environment variable `GITHUB_TOKEN` if no user session exists
-- Query parameter `token` still supported for backward compatibility
-
-**Environment Variables:**
-- `GITHUB_TOKEN` (optional): GitHub API token set in Cloudflare Worker environment. Used when no token is provided in query parameters or session. This is useful for automated workflows and GitHub Actions.
+- Users must authenticate via GitHub OAuth to access private repositories
+- The OAuth token is stored securely in an HTTP-only session cookie
 
 **Implementation Details:**
 - **Branch Filtering**: Only retrieves commits from the default branch (main or master) of each repository
