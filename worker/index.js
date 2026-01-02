@@ -41,6 +41,11 @@ const corsHeaders = {
 // Cache TTL: 1 hour
 const CACHE_TTL = 3600;
 
+// Build timestamp injected at deploy time via --define BUILD_TIMESTAMP
+// This automatically invalidates cache on each new deployment
+// Falls back to 'dev' for local development
+const CACHE_VERSION = typeof BUILD_TIMESTAMP !== 'undefined' ? BUILD_TIMESTAMP : 'dev';
+
 // Session cookie name
 const SESSION_COOKIE_NAME = 'gh_wrapped_session';
 
@@ -1708,8 +1713,8 @@ async function handleRequest(request, env, ctx) {
       });
     }
     
-    // Create cache key
-    const cacheKey = `wrapped:${username}:${year}${token ? ':private' : ''}`;
+    // Create cache key with version to invalidate cache on releases
+    const cacheKey = `wrapped:${CACHE_VERSION}:${username}:${year}${token ? ':private' : ''}`;
     
     // Try to get from cache
     const cache = caches.default;
