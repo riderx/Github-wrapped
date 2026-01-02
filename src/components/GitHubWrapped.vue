@@ -187,7 +187,29 @@
         </div>
       </div>
 
-      <!-- Slide 7: Work Style -->
+      <!-- Slide 7: Notable Contributions -->
+      <div class="slide slide-contributions" v-if="notableContributionsList?.length">
+        <h2 class="slide-title">🏅 Notable Contributions</h2>
+        <p class="slide-subtitle">Your standout work</p>
+
+        <div class="contributions-bento">
+          <div
+            v-for="(contribution, index) in notableContributionsList.slice(0, 4)"
+            :key="index"
+            class="contribution-card"
+          >
+            <div class="contribution-summary">{{ contribution.summary }}</div>
+            <div class="contribution-meta">
+              <span class="contribution-repo">📦 {{ contribution.repo }}</span>
+              <a :href="getCommitUrl(contribution)" target="_blank" rel="noopener noreferrer" class="contribution-link">
+                🔗 {{ formatSha(contribution.sha) }}
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Slide 8: Work Style -->
       <div class="slide slide-style" v-if="insights?.workStyle">
         <h2 class="slide-title">🎨 Your Coding Style</h2>
         <p class="slide-subtitle" v-if="insights.workStyle.description">
@@ -210,7 +232,7 @@
         </div>
       </div>
 
-      <!-- Slide 8: Fun Facts -->
+      <!-- Slide 9: Fun Facts -->
       <div class="slide slide-funfacts" v-if="funFactsList?.length">
         <h2 class="slide-title">✨ Fun Facts</h2>
         <p class="slide-subtitle">The quirky stuff</p>
@@ -227,7 +249,7 @@
         </div>
       </div>
 
-      <!-- Slide 9: Topics & Evolution -->
+      <!-- Slide 10: Topics & Evolution -->
       <div class="slide slide-topics" v-if="topicsList?.length || insights?.technicalEvolution">
         <h2 class="slide-title">📈 Your Evolution</h2>
 
@@ -257,7 +279,7 @@
         </div>
       </div>
 
-      <!-- Slide 10: Quotes -->
+      <!-- Slide 11: Quotes -->
       <div class="slide slide-quotes" v-if="insights?.quotableCommits?.length">
         <h2 class="slide-title">💬 Quotable Commits</h2>
         <p class="slide-subtitle">Words for the ages</p>
@@ -275,7 +297,7 @@
         </div>
       </div>
 
-      <!-- Slide 11: Month by Month -->
+      <!-- Slide 12: Month by Month -->
       <div class="slide slide-monthly" v-if="insights?.monthByMonth">
         <h2 class="slide-title">📅 Month by Month</h2>
         <p class="slide-subtitle" v-if="insights.monthByMonth.narrative">
@@ -298,7 +320,7 @@
         </div>
       </div>
 
-      <!-- Slide 12: Looking Ahead -->
+      <!-- Slide 13: Looking Ahead -->
       <div class="slide slide-future" v-if="insights?.yearAheadOutlook">
         <h2 class="slide-title">🔮 Looking Ahead</h2>
 
@@ -365,6 +387,7 @@ export default {
       if (props.data.stats.topLanguages?.length > 0) slides.push('languages')
       if (hasProudMoments.value || hasStruggles.value) slides.push('achievements')
       if (insights.value.projectSpotlight?.projects?.length) slides.push('projects')
+      if (notableContributionsList.value?.length) slides.push('contributions')
       if (insights.value.workStyle) slides.push('style')
       if (funFactsList.value?.length) slides.push('funfacts')
       if (topicsList.value?.length || insights.value.technicalEvolution) slides.push('topics')
@@ -411,6 +434,25 @@ export default {
       if (i.funFact) return [i.funFact]
       return []
     })
+
+    // Handle notable contributions (from main)
+    const notableContributionsList = computed(() => {
+      const i = insights.value
+      if (Array.isArray(i.notableContributions)) return i.notableContributions
+      return []
+    })
+
+    // Get GitHub commit URL (from main)
+    const getCommitUrl = (contribution) => {
+      if (!contribution.sha || !contribution.repo) return '#'
+      return `https://github.com/${contribution.repo}/commit/${contribution.sha}`
+    }
+
+    // Format SHA for display (first 7 characters) (from main)
+    const formatSha = (sha) => {
+      if (!sha) return ''
+      return sha.substring(0, 7)
+    }
 
     const nextSlide = () => {
       if (currentSlide.value < totalSlides.value - 1) {
@@ -550,6 +592,9 @@ export default {
       proudMomentsList,
       topicsList,
       funFactsList,
+      notableContributionsList,
+      getCommitUrl,
+      formatSha,
       nextSlide,
       prevSlide,
       handleKeydown,
@@ -1057,6 +1102,56 @@ export default {
   font-style: italic;
 }
 
+/* ==================== CONTRIBUTIONS SLIDE ==================== */
+.contributions-bento {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  max-width: 600px;
+}
+
+.contribution-card {
+  background: var(--bg-secondary);
+  border-radius: 20px;
+  padding: 20px;
+  border-left: 4px solid var(--accent-primary);
+}
+
+.contribution-summary {
+  font-size: 1rem;
+  color: var(--text-primary);
+  line-height: 1.6;
+  margin-bottom: 12px;
+}
+
+.contribution-meta {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-size: 0.875rem;
+  flex-wrap: wrap;
+}
+
+.contribution-repo {
+  color: var(--text-secondary);
+}
+
+.contribution-link {
+  color: var(--accent-primary);
+  text-decoration: none;
+  font-family: monospace;
+  padding: 4px 8px;
+  background: var(--bg-primary);
+  border-radius: 6px;
+  transition: all 0.2s ease;
+}
+
+.contribution-link:hover {
+  background: var(--accent-primary);
+  color: var(--bg-primary);
+}
+
 /* ==================== WORK STYLE SLIDE ==================== */
 .style-grid {
   display: grid;
@@ -1133,6 +1228,7 @@ export default {
   font-size: 0.875rem;
   color: var(--text-secondary);
   line-height: 1.5;
+  margin: 0;
 }
 
 /* ==================== TOPICS SLIDE ==================== */

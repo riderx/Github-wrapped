@@ -769,31 +769,40 @@ function prepareCommitStats(allCommits) {
   stats.messageStats.avgLength = Math.round(totalMessageLength / allCommits.length);
 
   // Calculate longest streak with start/end dates
+  // First, deduplicate dates to unique days (not individual commits)
   if (dates.length > 0) {
-    dates.sort((a, b) => a - b);
+    const uniqueDaysSet = new Set();
+    dates.forEach(date => {
+      uniqueDaysSet.add(date.toISOString().split('T')[0]);
+    });
+    const uniqueDays = Array.from(uniqueDaysSet).sort();
+
     let currentStreak = 1;
     let maxStreak = 1;
-    let streakStart = dates[0];
-    let maxStreakStart = dates[0];
-    let maxStreakEnd = dates[0];
+    let streakStartIdx = 0;
+    let maxStreakStartIdx = 0;
+    let maxStreakEndIdx = 0;
 
-    for (let i = 1; i < dates.length; i++) {
-      const diffDays = Math.floor((dates[i] - dates[i-1]) / (1000 * 60 * 60 * 24));
-      if (diffDays <= 1) {
+    for (let i = 1; i < uniqueDays.length; i++) {
+      const prevDate = new Date(uniqueDays[i - 1]);
+      const currDate = new Date(uniqueDays[i]);
+      const diffDays = Math.round((currDate - prevDate) / (1000 * 60 * 60 * 24));
+
+      if (diffDays === 1) {
         currentStreak++;
         if (currentStreak > maxStreak) {
           maxStreak = currentStreak;
-          maxStreakStart = streakStart;
-          maxStreakEnd = dates[i];
+          maxStreakStartIdx = streakStartIdx;
+          maxStreakEndIdx = i;
         }
       } else {
         currentStreak = 1;
-        streakStart = dates[i];
+        streakStartIdx = i;
       }
     }
     stats.longestStreak = maxStreak;
-    stats.longestStreakStart = maxStreakStart.toISOString().split('T')[0];
-    stats.longestStreakEnd = maxStreakEnd.toISOString().split('T')[0];
+    stats.longestStreakStart = uniqueDays[maxStreakStartIdx];
+    stats.longestStreakEnd = uniqueDays[maxStreakEndIdx];
   }
 
   return stats;
@@ -843,9 +852,58 @@ async function analyzeCommitsWithAI(allCommits, env, token = null) {
   const additionalFixSamples = stats.types.fixes.slice(fixCommitDetails.length, 30)
     .map(c => `[${c.repo}] ${c.message}`).join('\n');
 
-  const featureSamples = stats.types.features.slice(0, 30).map(c => `[${c.repo}] ${c.message}`).join('\n');
-  const significantSamples = stats.significantCommits.slice(0, 20).map(c => `[${c.repo}] ${c.message}\n${c.fullMessage.split('\n').slice(1, 4).join('\n')}`).join('\n\n');
-  const revertSamples = stats.revertedCommits.slice(0, 10).map(c => `[${c.repo}] ${c.message}`).join('\n');
+  const featureSamples = stats.types.features.slice(0, 30).map(c => `[${c.sha}] [${c.repo}] ${c.message}`).join('\n');
+  const significantSamples = stats.significantCommits.slice(0, 20).map(c => `[${c.sha}] [${c.repo}] ${c.message}\n${c.fullMessage.split('\n').slice(1, 4).join('\n')}`).join('\n\n');
+  const revertSamples = stats.revertedCommits.slice(0, 10).map(c => `[${c.sha}] [${c.repo}] ${c.message}`).join('\n');
+
+  // Prepare notable commits with file context for AI summarization
+  // Combine significant commits and top features to get the most notable work
+  const notableCommitCandidates = [
+    ...stats.significantCommits.slice(0, 5),
+    ...stats.types.features.slice(0, 5),
+    ...fixCommitDetails.slice(0, 3),
+  ];
+  // Deduplicate by SHA
+  const seenShas = new Set();
+  const uniqueNotableCommits = [];
+  for (const c of notableCommitCandidates) {
+    if (!seenShas.has(c.sha)) {
+      seenShas.add(c.sha);
+      uniqueNotableCommits.push(c);
+    }
+  }
+  // Fetch file details for notable commits that don't have them yet
+  let notableCommitsWithContext = [];
+  if (token) {
+    console.log(`[AI Analysis] Fetching file details for ${uniqueNotableCommits.length} notable commits...`);
+    for (const commit of uniqueNotableCommits.slice(0, 8)) {
+      if (commit.fileChanges) {
+        // Already has file context
+        notableCommitsWithContext.push(commit);
+      } else {
+        const details = await fetchCommitDetails(commit.repo, commit.sha, token);
+        if (details) {
+          notableCommitsWithContext.push({
+            ...commit,
+            fileChanges: details.files,
+            stats: details.stats,
+          });
+        } else {
+          notableCommitsWithContext.push(commit);
+        }
+      }
+    }
+  } else {
+    notableCommitsWithContext = uniqueNotableCommits.slice(0, 8);
+  }
+
+  // Format notable commits for AI analysis
+  const notableCommitsSamples = notableCommitsWithContext.map(c => {
+    const filesInfo = c.fileChanges ?
+      `\nFiles: ${c.fileChanges.map(f => `${f.filename} (${f.status}: +${f.additions}/-${f.deletions})`).join(', ')}` : '';
+    const statsInfo = c.stats ? `\nChanges: +${c.stats.additions}/-${c.stats.deletions} (${c.stats.total} files)` : '';
+    return `SHA: ${c.sha}\nRepo: ${c.repo}\nMessage: ${c.message}${filesInfo}${statsInfo}`;
+  }).join('\n\n');
 
   // Create the comprehensive prompt
   const analysisPrompt = `You are an expert storyteller and data analyst. Your task is to write a COMPREHENSIVE, DETAILED year-in-review for a developer based on their GitHub activity. This should be a rich, insightful, and substantial narrative - think of it like an annual report or a detailed personal retrospective.
@@ -891,6 +949,10 @@ ${significantSamples || 'No major milestones recorded'}
 
 ### Reverted Work (setbacks and pivots)
 ${revertSamples || 'No reverts recorded'}
+
+### Notable Commits for Highlighting (with file context)
+These are the most significant commits to analyze for the notableContributions section. Write insightful summaries based on the file changes, not just the commit messages:
+${notableCommitsSamples || 'No notable commits with context'}
 
 ---
 
@@ -954,7 +1016,13 @@ Write a comprehensive JSON response with the following structure. Each section s
 
   "funFacts": ["Array of 5-7 interesting, specific, and memorable fun facts about their coding year"],
 
-  "quotableCommits": ["3-5 commit messages that stand out as particularly interesting, funny, or telling"],
+  "notableContributions": [
+    {
+      "sha": "the commit SHA from the samples provided",
+      "repo": "the repository name",
+      "summary": "A meaningful 1-2 sentence summary explaining what this commit accomplished and why it matters. Do NOT just copy the commit message - analyze the context and file changes to write an insightful description of the actual contribution."
+    }
+  ],
 
   "yearAheadOutlook": "A paragraph of encouragement and forward-looking thoughts based on the patterns you see",
 
@@ -970,6 +1038,7 @@ IMPORTANT GUIDELINES:
 - Be PERSONAL - write as if you really understand this developer's journey
 - NEVER just copy commit message titles as challenge or achievement descriptions. Use the file change context to understand WHAT was actually changed and write meaningful descriptions that explain the technical work and its significance.
 - For challenges/struggles: analyze the file names and changes to infer what systems were being debugged (e.g., "auth.ts" suggests authentication issues, "cache.js" suggests caching problems)
+- For notableContributions: Select 3-5 commits from the "Notable Commits for Highlighting" section and write insightful summaries based on the file changes. Use the EXACT SHA and repo values provided. The summary should explain what was accomplished, not just restate the commit message.
 
 Return ONLY the JSON, no other text.`;
 
@@ -1048,6 +1117,28 @@ Return ONLY the JSON, no other text.`;
   } catch (error) {
     console.error('[AI Analysis] AI analysis failed:', error);
     return null;
+  }
+}
+
+/**
+ * Generate a meaningful summary for a commit based on its message and context
+ * Used as fallback when AI is not available
+ */
+function generateCommitSummary(commit) {
+  const msg = commit.message.toLowerCase();
+  const firstLine = commit.message.split('\n')[0];
+
+  // Detect type and generate appropriate summary
+  if (msg.includes('fix') || msg.includes('bug') || msg.includes('issue')) {
+    return `Fixed an issue in ${commit.repo.split('/')[1] || commit.repo}: ${firstLine}`;
+  } else if (msg.includes('add') || msg.includes('implement') || msg.includes('feature') || msg.includes('new')) {
+    return `Added new functionality to ${commit.repo.split('/')[1] || commit.repo}: ${firstLine}`;
+  } else if (msg.includes('refactor') || msg.includes('improve') || msg.includes('optimize')) {
+    return `Improved code quality in ${commit.repo.split('/')[1] || commit.repo}: ${firstLine}`;
+  } else if (msg.includes('update') || msg.includes('upgrade')) {
+    return `Updated ${commit.repo.split('/')[1] || commit.repo}: ${firstLine}`;
+  } else {
+    return `Contributed to ${commit.repo.split('/')[1] || commit.repo}: ${firstLine}`;
   }
 }
 
@@ -1196,11 +1287,17 @@ ${stats.longestStreak > 7 ? `A ${stats.longestStreak}-day coding streak${stats.l
     stats.revertedCommits.length > 0 ? `You reverted ${stats.revertedCommits.length} commits - learning from mistakes!` : 'You rarely had to revert commits - clean coding!'
   ];
 
-  // Quotable commits
-  const quotableCommits = [
-    ...stats.significantCommits.slice(0, 3).map(c => c.message),
-    ...stats.types.features.slice(0, 2).map(c => c.message)
+  // Notable contributions - create structured objects with sha, repo, and a generated summary
+  const notableCommitsList = [
+    ...stats.significantCommits.slice(0, 3),
+    ...stats.types.features.slice(0, 2)
   ].slice(0, 5);
+
+  const notableContributions = notableCommitsList.map(c => ({
+    sha: c.sha,
+    repo: c.repo,
+    summary: generateCommitSummary(c),
+  }));
 
   return {
     executiveSummary,
@@ -1262,7 +1359,7 @@ Working across ${repoCount} repositories required adaptability and context-switc
       valleys: slowMonths
     },
     funFacts,
-    quotableCommits: quotableCommits.length > 0 ? quotableCommits : ['Building software, one commit at a time'],
+    notableContributions: notableContributions.length > 0 ? notableContributions : [],
     yearAheadOutlook: `Based on your ${totalCommits} commits this year, you've built strong momentum. Consider focusing on ${stats.types.tests.length < 50 ? 'expanding test coverage' : 'maintaining your testing discipline'} and ${stats.types.docs.length < 20 ? 'adding more documentation' : 'continuing your documentation habits'}. Your versatility across ${repoCount} repos is a strength to build on.`,
     finalWords: `${totalCommits.toLocaleString()} commits. ${repoCount} repositories. One dedicated developer. Keep shipping.`,
     _rawStats: {
@@ -1522,11 +1619,13 @@ async function generateWrapped(username, year, token, env) {
     },
     // AI-generated or rule-based insights
     insights,
-    // All commits for detailed analysis (messages, dates, repos)
+    // All commits for detailed analysis (messages, dates, repos, with sha/url for linking)
     allCommits: allCommits.map(c => ({
       message: c.message.split('\n')[0], // First line only
       date: c.date,
       repo: c.repo,
+      sha: c.sha,
+      url: c.url,
     })),
     generatedAt: new Date().toISOString(),
   };
