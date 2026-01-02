@@ -8,9 +8,9 @@
     "build": "vite build",
     "preview": "vite preview",
     "worker:dev": "wrangler dev worker/index.js",
-    "worker:deploy": "wrangler deploy --define BUILD_TIMESTAMP:\\\"$(date +%s)\\\"",
+    "worker:deploy": "wrangler deploy --define BUILD_TIMESTAMP:$(date +%s)",
     "dev:local": "npm run build && wrangler dev",
-    "deploy": "npm run build && wrangler deploy --define BUILD_TIMESTAMP:\\\"$(date +%s)\\\""
+    "deploy": "npm run build && wrangler deploy --define BUILD_TIMESTAMP:$(date +%s)"
   },
   "keywords": ["github", "wrapped", "vue", "cloudflare-workers"],
   "author": "",
