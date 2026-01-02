@@ -35,6 +35,8 @@
                 type="text"
                 :placeholder="isAuthenticated ? 'Optional - defaults to your username' : 'GitHub username...'"
                 class="input-main"
+                autocomplete="off"
+                name="github-username-search"
               />
             </div>
 
