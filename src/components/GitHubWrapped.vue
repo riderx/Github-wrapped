@@ -55,6 +55,9 @@
           <div v-if="insights?._rawStats?.longestStreak" class="stat-card">
             <div class="stat-number">{{ insights._rawStats.longestStreak }}</div>
             <div class="stat-label">Day Streak</div>
+            <div v-if="insights._rawStats.longestStreak > 365 && insights._rawStats.longestStreakStart && insights._rawStats.longestStreakEnd" class="stat-dates">
+              {{ insights._rawStats.longestStreakStart }} to {{ insights._rawStats.longestStreakEnd }}
+            </div>
           </div>
           <div v-if="insights?._rawStats?.weekendCommits" class="stat-card">
             <div class="stat-number">{{ formatNumber(insights._rawStats.weekendCommits) }}</div>
@@ -589,6 +592,13 @@ export default {
   color: var(--text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.1em;
+}
+
+.stat-dates {
+  font-size: var(--font-caption);
+  color: var(--text-tertiary, var(--text-secondary));
+  margin-top: var(--space-xs);
+  opacity: 0.8;
 }
 
 /* Insights List */
