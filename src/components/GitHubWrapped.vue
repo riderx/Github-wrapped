@@ -99,6 +99,131 @@
         </div>
       </div>
 
+      <!-- Slide: Activity Patterns (Time of Day & Day of Week) -->
+      <div class="slide slide-activity" v-if="data.timeAnalysis?.hourlyActivity">
+        <h2 class="slide-title">When You Ship</h2>
+        <p class="slide-subtitle">Your coding rhythm</p>
+
+        <!-- Time of Day Chart -->
+        <div class="activity-section">
+          <h3 class="activity-label">Time of Day (UTC)</h3>
+          <div class="hour-chart">
+            <div
+              v-for="(count, hour) in data.timeAnalysis.hourlyActivity"
+              :key="'hour-' + hour"
+              class="hour-bar-wrapper"
+            >
+              <div
+                class="hour-bar"
+                :style="{ height: getHourBarHeight(count) }"
+                :class="{ 'peak-hour': hour === getPeakHourIndex }"
+              ></div>
+              <span class="hour-label" v-if="hour % 4 === 0">{{ hour }}h</span>
+            </div>
+          </div>
+          <p class="activity-insight">
+            Peak: <strong>{{ data.timeAnalysis.peakHour }}</strong>
+            <span v-if="data.timeAnalysis.codingStyle === 'night-owl'"> (Night Owl)</span>
+            <span v-else-if="data.timeAnalysis.codingStyle === 'early-bird'"> (Early Bird)</span>
+            <span v-else-if="data.timeAnalysis.codingStyle === 'evening-coder'"> (Evening Coder)</span>
+          </p>
+        </div>
+
+        <!-- Day of Week Chart -->
+        <div class="activity-section">
+          <h3 class="activity-label">Day of Week</h3>
+          <div class="day-chart">
+            <div
+              v-for="(count, day) in data.timeAnalysis.dailyActivity"
+              :key="'day-' + day"
+              class="day-bar-wrapper"
+            >
+              <div
+                class="day-bar"
+                :style="{ height: getDayBarHeight(count) }"
+                :class="{ 'weekend-bar': day === 0 || day === 6 }"
+              ></div>
+              <span class="day-label">{{ getDayName(day) }}</span>
+            </div>
+          </div>
+          <p class="activity-insight">
+            Peak: <strong>{{ data.timeAnalysis.peakDay }}</strong>
+            <span v-if="data.timeAnalysis.isWeekendWarrior"> (Weekend Warrior!)</span>
+          </p>
+        </div>
+      </div>
+
+      <!-- Slide: Monthly & Seasonal Rhythm -->
+      <div class="slide slide-rhythm" v-if="data.timeAnalysis?.monthlyActivity">
+        <h2 class="slide-title">Your Year's Rhythm</h2>
+        <p class="slide-subtitle">When you were most productive</p>
+
+        <!-- Monthly Chart -->
+        <div class="rhythm-section">
+          <h3 class="rhythm-label">Monthly Activity</h3>
+          <div class="month-chart">
+            <div
+              v-for="(count, month) in data.timeAnalysis.monthlyActivity"
+              :key="'month-' + month"
+              class="month-bar-wrapper"
+            >
+              <div
+                class="month-bar"
+                :style="{ height: getMonthBarHeight(count) }"
+                :class="{ 'peak-month': getMonthName(month) === data.timeAnalysis.peakMonth }"
+              ></div>
+              <span class="month-label">{{ getMonthShort(month) }}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Seasonal & Best Week Stats -->
+        <div class="rhythm-stats">
+          <div class="rhythm-stat-card">
+            <span class="stat-emoji">{{ getSeasonEmoji(data.timeAnalysis.peakSeason) }}</span>
+            <div class="stat-value">{{ data.timeAnalysis.peakSeason }}</div>
+            <div class="stat-label">Best Season</div>
+          </div>
+          <div class="rhythm-stat-card">
+            <span class="stat-emoji">{{ data.timeAnalysis.peakMonth }}</span>
+            <div class="stat-value">{{ getMonthCommits(data.timeAnalysis.peakMonth) }}</div>
+            <div class="stat-label">Peak Month Commits</div>
+          </div>
+          <div class="rhythm-stat-card" v-if="data.timeAnalysis.bestWeek">
+            <span class="stat-emoji">Week {{ data.timeAnalysis.bestWeek.weekNumber }}</span>
+            <div class="stat-value">{{ data.timeAnalysis.bestWeek.commits }}</div>
+            <div class="stat-label">Best Week Commits</div>
+            <div class="stat-extra" v-if="data.timeAnalysis.bestWeek.dateRange">
+              {{ formatDateRange(data.timeAnalysis.bestWeek.dateRange) }}
+            </div>
+          </div>
+        </div>
+
+        <!-- Time of Day Breakdown -->
+        <div class="time-breakdown">
+          <div class="time-slot" v-if="data.timeAnalysis.morningCommits">
+            <span class="time-emoji">🌅</span>
+            <span class="time-count">{{ formatNumber(data.timeAnalysis.morningCommits) }}</span>
+            <span class="time-label">Morning</span>
+          </div>
+          <div class="time-slot" v-if="data.timeAnalysis.afternoonCommits">
+            <span class="time-emoji">☀️</span>
+            <span class="time-count">{{ formatNumber(data.timeAnalysis.afternoonCommits) }}</span>
+            <span class="time-label">Afternoon</span>
+          </div>
+          <div class="time-slot" v-if="data.timeAnalysis.eveningCommits">
+            <span class="time-emoji">🌆</span>
+            <span class="time-count">{{ formatNumber(data.timeAnalysis.eveningCommits) }}</span>
+            <span class="time-label">Evening</span>
+          </div>
+          <div class="time-slot" v-if="data.timeAnalysis.nightCommits">
+            <span class="time-emoji">🌙</span>
+            <span class="time-count">{{ formatNumber(data.timeAnalysis.nightCommits) }}</span>
+            <span class="time-label">Night</span>
+          </div>
+        </div>
+      </div>
+
       <!-- Slide 3: Your Story (Executive Summary) -->
       <div class="slide slide-story" v-if="insights?.executiveSummary || insights?.story">
         <h2 class="slide-title">📖 Your Story</h2>
@@ -383,6 +508,9 @@ export default {
     // Calculate which slides should be shown based on available data
     const availableSlides = computed(() => {
       const slides = ['hero', 'stats']
+      // Add activity analytics slides right after stats
+      if (props.data.timeAnalysis?.hourlyActivity) slides.push('activity')
+      if (props.data.timeAnalysis?.monthlyActivity) slides.push('rhythm')
       if (insights.value.executiveSummary || insights.value.story) slides.push('story')
       if (props.data.stats.topLanguages?.length > 0) slides.push('languages')
       if (hasProudMoments.value || hasStruggles.value) slides.push('achievements')
@@ -579,6 +707,70 @@ export default {
       })
     }
 
+    // Activity chart helper functions
+    const getHourBarHeight = (count) => {
+      const max = Math.max(...(props.data.timeAnalysis?.hourlyActivity || [1]))
+      return `${(count / max) * 100}%`
+    }
+
+    const getDayBarHeight = (count) => {
+      const max = Math.max(...(props.data.timeAnalysis?.dailyActivity || [1]))
+      return `${(count / max) * 100}%`
+    }
+
+    const getMonthBarHeight = (count) => {
+      const max = Math.max(...(props.data.timeAnalysis?.monthlyActivity || [1]))
+      return `${(count / max) * 100}%`
+    }
+
+    const getPeakHourIndex = computed(() => {
+      const hourly = props.data.timeAnalysis?.hourlyActivity || []
+      return hourly.indexOf(Math.max(...hourly))
+    })
+
+    const getDayName = (day) => {
+      const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+      return days[day] || ''
+    }
+
+    const getMonthName = (month) => {
+      const months = ['January', 'February', 'March', 'April', 'May', 'June',
+                      'July', 'August', 'September', 'October', 'November', 'December']
+      return months[month] || ''
+    }
+
+    const getMonthShort = (month) => {
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+      return months[month] || ''
+    }
+
+    const getSeasonEmoji = (season) => {
+      const emojis = {
+        'Winter': '❄️',
+        'Spring': '🌸',
+        'Summer': '☀️',
+        'Fall': '🍂'
+      }
+      return emojis[season] || '📅'
+    }
+
+    const getMonthCommits = (monthName) => {
+      const months = ['January', 'February', 'March', 'April', 'May', 'June',
+                      'July', 'August', 'September', 'October', 'November', 'December']
+      const monthIndex = months.indexOf(monthName)
+      if (monthIndex === -1) return 0
+      return formatNumber(props.data.timeAnalysis?.monthlyActivity?.[monthIndex] || 0)
+    }
+
+    const formatDateRange = (range) => {
+      if (!range?.start || !range?.end) return ''
+      const start = new Date(range.start)
+      const end = new Date(range.end)
+      const options = { month: 'short', day: 'numeric' }
+      return `${start.toLocaleDateString('en-US', options)} - ${end.toLocaleDateString('en-US', options)}`
+    }
+
     return {
       currentSlide,
       totalSlides,
@@ -605,7 +797,18 @@ export default {
       getMedal,
       getProjectEmoji,
       getFunEmoji,
-      shareWrapped
+      shareWrapped,
+      // Activity chart functions
+      getHourBarHeight,
+      getDayBarHeight,
+      getMonthBarHeight,
+      getPeakHourIndex,
+      getDayName,
+      getMonthName,
+      getMonthShort,
+      getSeasonEmoji,
+      getMonthCommits,
+      formatDateRange
     }
   }
 }
@@ -1525,6 +1728,260 @@ export default {
   .scroll-hint,
   .closing-emoji {
     animation: none;
+  }
+}
+
+/* ==================== ACTIVITY SLIDE ==================== */
+.slide-activity {
+  background: linear-gradient(160deg, var(--bg-primary) 0%, rgba(29, 185, 84, 0.05) 100%);
+}
+
+.activity-section {
+  width: 100%;
+  max-width: 600px;
+  margin-bottom: 24px;
+}
+
+.activity-label {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  margin-bottom: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.hour-chart {
+  display: flex;
+  align-items: flex-end;
+  height: 80px;
+  gap: 2px;
+  background: var(--bg-secondary);
+  border-radius: 12px;
+  padding: 12px 8px;
+}
+
+.hour-bar-wrapper {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  height: 100%;
+}
+
+.hour-bar {
+  width: 100%;
+  background: linear-gradient(to top, var(--accent-primary), rgba(29, 185, 84, 0.6));
+  border-radius: 2px 2px 0 0;
+  min-height: 2px;
+  transition: height 0.3s ease;
+}
+
+.hour-bar.peak-hour {
+  background: linear-gradient(to top, #ff9500, #ffcc00);
+  box-shadow: 0 0 8px rgba(255, 149, 0, 0.4);
+}
+
+.hour-label {
+  font-size: 0.625rem;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+
+.day-chart {
+  display: flex;
+  align-items: flex-end;
+  height: 100px;
+  gap: 8px;
+  background: var(--bg-secondary);
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.day-bar-wrapper {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  height: 100%;
+}
+
+.day-bar {
+  width: 100%;
+  max-width: 40px;
+  background: linear-gradient(to top, var(--accent-primary), rgba(29, 185, 84, 0.6));
+  border-radius: 4px 4px 0 0;
+  min-height: 4px;
+  transition: height 0.3s ease;
+}
+
+.day-bar.weekend-bar {
+  background: linear-gradient(to top, #9b59b6, #8e44ad);
+}
+
+.day-label {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  margin-top: 8px;
+  font-weight: 500;
+}
+
+.activity-insight {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  margin-top: 8px;
+  text-align: center;
+}
+
+.activity-insight strong {
+  color: var(--accent-primary);
+}
+
+/* ==================== RHYTHM SLIDE ==================== */
+.slide-rhythm {
+  background: linear-gradient(160deg, var(--bg-primary) 0%, rgba(155, 89, 182, 0.05) 100%);
+}
+
+.rhythm-section {
+  width: 100%;
+  max-width: 600px;
+  margin-bottom: 20px;
+}
+
+.rhythm-label {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  margin-bottom: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.month-chart {
+  display: flex;
+  align-items: flex-end;
+  height: 100px;
+  gap: 4px;
+  background: var(--bg-secondary);
+  border-radius: 12px;
+  padding: 16px 8px;
+}
+
+.month-bar-wrapper {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  height: 100%;
+}
+
+.month-bar {
+  width: 100%;
+  background: linear-gradient(to top, var(--accent-primary), rgba(29, 185, 84, 0.6));
+  border-radius: 3px 3px 0 0;
+  min-height: 4px;
+  transition: height 0.3s ease;
+}
+
+.month-bar.peak-month {
+  background: linear-gradient(to top, #ff9500, #ffcc00);
+  box-shadow: 0 0 8px rgba(255, 149, 0, 0.4);
+}
+
+.month-label {
+  font-size: 0.625rem;
+  color: var(--text-secondary);
+  margin-top: 6px;
+  text-transform: uppercase;
+}
+
+.rhythm-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  width: 100%;
+  max-width: 600px;
+  margin-bottom: 20px;
+}
+
+.rhythm-stat-card {
+  background: var(--bg-secondary);
+  border-radius: 16px;
+  padding: 16px;
+  text-align: center;
+}
+
+.stat-emoji {
+  font-size: 1.25rem;
+  display: block;
+  margin-bottom: 8px;
+}
+
+.stat-value {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--accent-primary);
+}
+
+.stat-label {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+
+.stat-extra {
+  font-size: 0.625rem;
+  color: var(--text-secondary);
+  margin-top: 4px;
+  opacity: 0.8;
+}
+
+.time-breakdown {
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+  width: 100%;
+  max-width: 600px;
+  flex-wrap: wrap;
+}
+
+.time-slot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: var(--bg-secondary);
+  border-radius: 12px;
+  padding: 12px 16px;
+  min-width: 70px;
+}
+
+.time-emoji {
+  font-size: 1.25rem;
+  margin-bottom: 4px;
+}
+
+.time-count {
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.time-label {
+  font-size: 0.625rem;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+}
+
+@media (max-width: 768px) {
+  .rhythm-stats {
+    grid-template-columns: 1fr;
+  }
+
+  .time-breakdown {
+    gap: 8px;
+  }
+
+  .time-slot {
+    min-width: 60px;
+    padding: 8px 12px;
   }
 }
 </style>
