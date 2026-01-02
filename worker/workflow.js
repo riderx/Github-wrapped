@@ -245,10 +245,12 @@ export class GitHubWrappedWorkflow extends WorkflowEntrypoint {
           const query = `author:${username} type:pr created:${year}-01-01..${year}-12-31`;
           const url = `https://api.github.com/search/issues?q=${encodeURIComponent(query)}&per_page=1`;
           const result = await fetchGitHub(url, token);
-          console.log(`[Workflow] User ${username} has ${result.total_count} PRs in ${year}`);
-          return result.total_count || 0;
-        } catch {
-          return 0;
+          const count = result.total_count || 0;
+          console.log(`[Workflow] User ${username} has ${count} PRs in ${year}`);
+          return count;
+        } catch (error) {
+          console.error(`[Workflow] Error fetching PR count for ${username}:`, error.message);
+          throw error; // Let workflow retry handle it
         }
       }
     );
@@ -265,10 +267,12 @@ export class GitHubWrappedWorkflow extends WorkflowEntrypoint {
           const query = `author:${username} type:issue created:${year}-01-01..${year}-12-31`;
           const url = `https://api.github.com/search/issues?q=${encodeURIComponent(query)}&per_page=1`;
           const result = await fetchGitHub(url, token);
-          console.log(`[Workflow] User ${username} has ${result.total_count} issues in ${year}`);
-          return result.total_count || 0;
-        } catch {
-          return 0;
+          const count = result.total_count || 0;
+          console.log(`[Workflow] User ${username} has ${count} issues in ${year}`);
+          return count;
+        } catch (error) {
+          console.error(`[Workflow] Error fetching issue count for ${username}:`, error.message);
+          throw error; // Let workflow retry handle it
         }
       }
     );
@@ -285,10 +289,12 @@ export class GitHubWrappedWorkflow extends WorkflowEntrypoint {
           const query = `reviewed-by:${username} type:pr created:${year}-01-01..${year}-12-31`;
           const url = `https://api.github.com/search/issues?q=${encodeURIComponent(query)}&per_page=1`;
           const result = await fetchGitHub(url, token);
-          console.log(`[Workflow] User ${username} reviewed ${result.total_count} PRs in ${year}`);
-          return result.total_count || 0;
-        } catch {
-          return 0;
+          const count = result.total_count || 0;
+          console.log(`[Workflow] User ${username} reviewed ${count} PRs in ${year}`);
+          return count;
+        } catch (error) {
+          console.error(`[Workflow] Error fetching review count for ${username}:`, error.message);
+          throw error; // Let workflow retry handle it
         }
       }
     );
