@@ -1,7 +1,11 @@
 /**
  * Cloudflare Worker for GitHub Wrapped API
  * Handles GitHub API requests with caching support
+ * Uses Cloudflare Workflows for durable, long-running commit fetching
  */
+
+// Re-export the workflow class for Cloudflare
+export { GitHubWrappedWorkflow } from './workflow.js';
 
 /**
  * Get CORS headers for a request
@@ -43,10 +47,10 @@ const SESSION_COOKIE_NAME = 'gh_wrapped_session';
 // Session expiry: 7 days
 const SESSION_EXPIRY = 7 * 24 * 60 * 60;
 
-// API limits to avoid rate limiting
-const MAX_REPO_PAGES = 10; // Maximum number of pages to fetch (100 repos per page)
-const MAX_REPOS_TO_CHECK = 20; // Maximum number of repos to check for commits
-const TOP_REPOS_TO_SHOW = 5; // Number of top repositories to display
+// API configuration
+const MAX_REPO_PAGES = 10; // Maximum number of pages to fetch for user repos (100 repos per page)
+const TOP_REPOS_TO_SHOW = 10; // Number of top repositories to display in summary
+// Note: We now use GitHub Search API with adaptive date splitting - NO commit limits!
 
 /**
  * Fetch GitHub API with authentication and enhanced error handling
@@ -207,6 +211,348 @@ async function getRepoCommits(owner, repo, username, year, token) {
     console.error(`[getRepoCommits] Error fetching commits for ${owner}/${repo}:`, error.message);
     return [];
   }
+}
+
+/**
+ * Search commits for a specific date range with full pagination
+ * Returns { commits: [], totalCount: number, incomplete: boolean }
+ */
+async function searchCommitsInRange(username, startDate, endDate, token) {
+  const dateRange = `${startDate}..${endDate}`;
+  const commits = [];
+  let page = 1;
+  let totalCount = 0;
+  let incomplete = false;
+
+  while (true) {
+    try {
+      const searchUrl = `https://api.github.com/search/commits?q=author:${username}+committer-date:${dateRange}&per_page=100&page=${page}&sort=committer-date&order=desc`;
+
+      const headers = {
+        'User-Agent': 'GitHub-Wrapped',
+        'Accept': 'application/vnd.github.cloak-preview+json',
+      };
+
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      const response = await fetch(searchUrl, { headers });
+
+      if (!response.ok) {
+        if (response.status === 403) {
+          console.error(`[searchCommitsInRange] Rate limit hit for ${dateRange}`);
+          incomplete = true;
+          break;
+        }
+        if (response.status === 422) {
+          // GitHub returns 422 when pagination goes beyond 1000
+          console.log(`[searchCommitsInRange] Pagination limit reached for ${dateRange}, need to split`);
+          incomplete = true;
+          break;
+        }
+        console.error(`[searchCommitsInRange] API error ${response.status} for ${dateRange}`);
+        break;
+      }
+
+      const data = await response.json();
+      totalCount = data.total_count || 0;
+      const items = data.items || [];
+
+      if (items.length === 0) break;
+
+      for (const item of items) {
+        const commit = item.commit;
+        commits.push({
+          sha: item.sha,
+          message: commit.message,
+          date: commit.committer?.date || commit.author?.date,
+          repo: item.repository?.full_name || 'unknown/unknown',
+          url: item.html_url,
+        });
+      }
+
+      // Check if we've hit the 1000 result limit
+      if (page >= 10) {
+        // GitHub only allows 10 pages (1000 results) max
+        if (totalCount > 1000) {
+          incomplete = true;
+        }
+        break;
+      }
+
+      if (items.length < 100) break;
+      page++;
+    } catch (error) {
+      console.error(`[searchCommitsInRange] Error for ${dateRange}:`, error.message);
+      break;
+    }
+  }
+
+  return { commits, totalCount, incomplete };
+}
+
+/**
+ * Get all days in a date range
+ */
+function getDaysInRange(startDate, endDate) {
+  const days = [];
+  const current = new Date(startDate);
+  const end = new Date(endDate);
+
+  while (current <= end) {
+    days.push(current.toISOString().split('T')[0]);
+    current.setDate(current.getDate() + 1);
+  }
+
+  return days;
+}
+
+/**
+ * Search for ALL commits by a user - NO LIMITS
+ * Uses adaptive splitting: year -> months -> weeks -> days if needed
+ * Will get EVERY single commit, no matter how many there are
+ */
+async function searchAllCommitsByUser(username, year, token) {
+  console.log(`[searchAllCommitsByUser] Searching ALL commits for ${username} in ${year} - NO LIMITS`);
+
+  const allCommits = [];
+  const seenShas = new Set(); // Deduplicate commits
+
+  // Start with monthly ranges
+  const months = [];
+  for (let m = 1; m <= 12; m++) {
+    const startDate = `${year}-${String(m).padStart(2, '0')}-01`;
+    const lastDay = new Date(year, m, 0).getDate();
+    const endDate = `${year}-${String(m).padStart(2, '0')}-${lastDay}`;
+    months.push({ start: startDate, end: endDate });
+  }
+
+  for (const month of months) {
+    console.log(`[searchAllCommitsByUser] Processing ${month.start} to ${month.end}`);
+
+    let result = await searchCommitsInRange(username, month.start, month.end, token);
+
+    if (result.incomplete && result.totalCount > 1000) {
+      // Too many commits in this month, split into weeks
+      console.log(`[searchAllCommitsByUser] Month has ${result.totalCount} commits, splitting into weeks`);
+
+      result = { commits: [], totalCount: 0, incomplete: false };
+      const days = getDaysInRange(month.start, month.end);
+
+      // Split into ~7 day chunks
+      for (let i = 0; i < days.length; i += 7) {
+        const weekStart = days[i];
+        const weekEnd = days[Math.min(i + 6, days.length - 1)];
+
+        let weekResult = await searchCommitsInRange(username, weekStart, weekEnd, token);
+
+        if (weekResult.incomplete && weekResult.totalCount > 1000) {
+          // Even a week has too many, go day by day
+          console.log(`[searchAllCommitsByUser] Week ${weekStart} to ${weekEnd} has ${weekResult.totalCount} commits, going day by day`);
+
+          for (let d = i; d <= Math.min(i + 6, days.length - 1); d++) {
+            const dayResult = await searchCommitsInRange(username, days[d], days[d], token);
+            result.commits.push(...dayResult.commits);
+          }
+        } else {
+          result.commits.push(...weekResult.commits);
+        }
+      }
+    }
+
+    // Add commits, deduplicating by SHA
+    for (const commit of result.commits) {
+      if (!seenShas.has(commit.sha)) {
+        seenShas.add(commit.sha);
+        allCommits.push(commit);
+      }
+    }
+
+    console.log(`[searchAllCommitsByUser] Total commits so far: ${allCommits.length}`);
+  }
+
+  console.log(`[searchAllCommitsByUser] TOTAL: Found ${allCommits.length} commits for ${username} in ${year}`);
+  return allCommits;
+}
+
+/**
+ * Analyze commits to extract deep, meaningful statistics
+ */
+function analyzeCommits(commits) {
+  const repoMap = new Map();
+  const hourlyActivity = new Array(24).fill(0);
+  const dailyActivity = new Array(7).fill(0); // 0 = Sunday
+  const monthlyActivity = new Array(12).fill(0);
+  const commitsByDate = new Map(); // For streak calculation
+
+  // Keywords for categorization
+  const bugKeywords = ['fix', 'bug', 'issue', 'error', 'problem', 'broken', 'failing', 'debug', 'revert', 'hotfix', 'patch', 'crash', 'workaround'];
+  const featureKeywords = ['add', 'implement', 'create', 'new', 'feature', 'support', 'enable', 'introduce'];
+  const refactorKeywords = ['refactor', 'cleanup', 'improve', 'optimize', 'reorganize', 'simplify', 'restructure', 'rename', 'move'];
+  const docsKeywords = ['doc', 'readme', 'comment', 'documentation', 'typo', 'spelling'];
+  const testKeywords = ['test', 'spec', 'coverage', 'jest', 'mocha', 'cypress'];
+
+  for (const commit of commits) {
+    const repoName = commit.repo;
+    const date = new Date(commit.date);
+    const dateStr = date.toISOString().split('T')[0];
+    const msg = commit.message.toLowerCase();
+
+    // Track daily commits for streaks
+    commitsByDate.set(dateStr, (commitsByDate.get(dateStr) || 0) + 1);
+
+    // Time-based activity
+    hourlyActivity[date.getUTCHours()]++;
+    dailyActivity[date.getUTCDay()]++;
+    monthlyActivity[date.getUTCMonth()]++;
+
+    // Categorize commit
+    let category = 'other';
+    if (bugKeywords.some(kw => msg.includes(kw))) category = 'fix';
+    else if (featureKeywords.some(kw => msg.includes(kw))) category = 'feature';
+    else if (refactorKeywords.some(kw => msg.includes(kw))) category = 'refactor';
+    else if (docsKeywords.some(kw => msg.includes(kw))) category = 'docs';
+    else if (testKeywords.some(kw => msg.includes(kw))) category = 'test';
+
+    // Group by repo with rich stats
+    if (!repoMap.has(repoName)) {
+      repoMap.set(repoName, {
+        name: repoName.split('/')[1] || repoName,
+        fullName: repoName,
+        commits: [],
+        commitCount: 0,
+        fixes: 0,
+        features: 0,
+        refactors: 0,
+        docs: 0,
+        tests: 0,
+        other: 0,
+        firstCommit: date,
+        lastCommit: date,
+        activeDays: new Set(),
+        commitDates: [],
+      });
+    }
+
+    const repo = repoMap.get(repoName);
+    repo.commits.push(commit);
+    repo.commitCount++;
+    repo[category === 'fix' ? 'fixes' : category === 'feature' ? 'features' : category === 'refactor' ? 'refactors' : category === 'docs' ? 'docs' : category === 'test' ? 'tests' : 'other']++;
+    repo.activeDays.add(dateStr);
+    repo.commitDates.push(date);
+
+    if (date < repo.firstCommit) repo.firstCommit = date;
+    if (date > repo.lastCommit) repo.lastCommit = date;
+  }
+
+  // Calculate per-repo metrics
+  for (const [, repo] of repoMap) {
+    const daySpan = Math.max(1, Math.ceil((repo.lastCommit - repo.firstCommit) / (1000 * 60 * 60 * 24)));
+    repo.activeDaysCount = repo.activeDays.size;
+    repo.daysSpan = daySpan;
+    repo.commitsPerActiveDay = repo.commitCount / repo.activeDaysCount;
+    repo.problemRatio = repo.fixes / repo.commitCount; // How problematic was this repo?
+    repo.velocity = repo.commitCount / daySpan; // Commits per day
+
+    // Calculate "blitz score" - high commits in short bursts
+    // A blitz repo has high commits per active day but few active days
+    repo.blitzScore = repo.commitsPerActiveDay * (1 - (repo.activeDaysCount / Math.max(daySpan, 1)));
+
+    // Clean up temporary data
+    delete repo.activeDays;
+    delete repo.commitDates;
+  }
+
+  // Calculate streaks
+  const sortedDates = Array.from(commitsByDate.keys()).sort();
+  let currentStreak = 0;
+  let longestStreak = 0;
+  let longestStreakStart = null;
+  let longestStreakEnd = null;
+  let tempStreakStart = null;
+
+  for (let i = 0; i < sortedDates.length; i++) {
+    if (i === 0) {
+      currentStreak = 1;
+      tempStreakStart = sortedDates[i];
+    } else {
+      const prev = new Date(sortedDates[i - 1]);
+      const curr = new Date(sortedDates[i]);
+      const diffDays = Math.round((curr - prev) / (1000 * 60 * 60 * 24));
+
+      if (diffDays === 1) {
+        currentStreak++;
+      } else {
+        if (currentStreak > longestStreak) {
+          longestStreak = currentStreak;
+          longestStreakStart = tempStreakStart;
+          longestStreakEnd = sortedDates[i - 1];
+        }
+        currentStreak = 1;
+        tempStreakStart = sortedDates[i];
+      }
+    }
+  }
+
+  // Check final streak
+  if (currentStreak > longestStreak) {
+    longestStreak = currentStreak;
+    longestStreakStart = tempStreakStart;
+    longestStreakEnd = sortedDates[sortedDates.length - 1];
+  }
+
+  // Find peak times
+  const peakHour = hourlyActivity.indexOf(Math.max(...hourlyActivity));
+  const peakDay = dailyActivity.indexOf(Math.max(...dailyActivity));
+  const peakMonth = monthlyActivity.indexOf(Math.max(...monthlyActivity));
+
+  const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+  // Calculate weekend vs weekday
+  const weekendCommits = dailyActivity[0] + dailyActivity[6];
+  const weekdayCommits = dailyActivity.slice(1, 6).reduce((a, b) => a + b, 0);
+  const isWeekendWarrior = weekendCommits > weekdayCommits * 0.5; // More than 50% of weekday commits on weekends
+
+  // Night owl vs early bird
+  const nightCommits = hourlyActivity.slice(22, 24).reduce((a, b) => a + b, 0) + hourlyActivity.slice(0, 6).reduce((a, b) => a + b, 0);
+  const morningCommits = hourlyActivity.slice(6, 12).reduce((a, b) => a + b, 0);
+  const afternoonCommits = hourlyActivity.slice(12, 18).reduce((a, b) => a + b, 0);
+  const eveningCommits = hourlyActivity.slice(18, 22).reduce((a, b) => a + b, 0);
+
+  let codingStyle = 'balanced';
+  if (nightCommits > Math.max(morningCommits, afternoonCommits, eveningCommits)) codingStyle = 'night-owl';
+  else if (morningCommits > Math.max(afternoonCommits, eveningCommits)) codingStyle = 'early-bird';
+  else if (eveningCommits > afternoonCommits) codingStyle = 'evening-coder';
+
+  return {
+    repoMap,
+    timeAnalysis: {
+      hourlyActivity,
+      dailyActivity,
+      monthlyActivity,
+      peakHour,
+      peakHourFormatted: `${peakHour}:00 - ${peakHour + 1}:00 UTC`,
+      peakDay: dayNames[peakDay],
+      peakMonth: monthNames[peakMonth],
+      weekendCommits,
+      weekdayCommits,
+      isWeekendWarrior,
+      codingStyle,
+      nightCommits,
+      morningCommits,
+      afternoonCommits,
+      eveningCommits,
+    },
+    streaks: {
+      longestStreak,
+      longestStreakStart,
+      longestStreakEnd,
+      totalActiveDays: sortedDates.length,
+      commitsByDate: Object.fromEntries(commitsByDate),
+    },
+  };
 }
 
 /**
@@ -501,74 +847,122 @@ function analyzeCommitMessages(allCommits) {
  */
 async function generateWrapped(username, year, token, env) {
   console.log(`[generateWrapped] Starting for ${username}, year ${year}`);
-  
+
   // Get user info
   const userInfo = await getUserInfo(username, token);
   console.log(`[generateWrapped] User info retrieved for ${userInfo.login}`);
-  
-  // Get repositories (limit to recent ones)
-  const repos = await getUserRepos(username, token);
-  
-  // Filter repos updated in the target year and limit to avoid rate limits
-  const targetYear = parseInt(year);
-  const filteredRepos = repos
-    .filter(repo => {
-      const updatedYear = new Date(repo.updated_at).getFullYear();
-      return updatedYear >= targetYear - 1; // Include previous year to catch early commits
-    })
-    .sort((a, b) => b.stargazers_count - a.stargazers_count)
-    .slice(0, MAX_REPOS_TO_CHECK);
-  
-  console.log(`[generateWrapped] Checking ${filteredRepos.length} repositories for commits`);
-  
-  // Collect all commits for analysis
-  let allCommits = [];
-  let totalCommits = 0;
+
+  // Use GitHub Search API to find ALL commits by this user across ALL repositories
+  console.log(`[generateWrapped] Using Search API to find ALL commits across ALL repositories - NO LIMITS`);
+  const allCommits = await searchAllCommitsByUser(username, year, token);
+
+  // Analyze commits for deep insights
+  const analysis = analyzeCommits(allCommits);
+  const { repoMap, timeAnalysis, streaks } = analysis;
+  const totalCommits = allCommits.length;
+
+  console.log(`[generateWrapped] Found ${totalCommits} total commits across ${repoMap.size} repositories`);
+
+  // Build repository contributions list with rich stats
   let languageStats = {};
   let repoContributions = [];
-  let commitsByBranch = { main: 0, master: 0, other: 0 };
-  
-  for (const repo of filteredRepos) {
-    // Get commits for this repo (from default branch only)
-    const commits = await getRepoCommits(repo.owner.login, repo.name, username, year, token);
-    
-    if (commits.length > 0) {
-      totalCommits += commits.length;
-      allCommits = allCommits.concat(commits); // Collect all commits for AI analysis
-      
-      // Track commits by branch
-      commits.forEach(commit => {
-        if (commit.branch === 'main') commitsByBranch.main++;
-        else if (commit.branch === 'master') commitsByBranch.master++;
-        else commitsByBranch.other++;
-      });
-      
+
+  // Get all repos sorted by commit count
+  const allRepoData = Array.from(repoMap.values()).sort((a, b) => b.commitCount - a.commitCount);
+
+  // Fetch additional repo info for top 50 repos
+  const topReposToFetch = allRepoData.slice(0, 50);
+  console.log(`[generateWrapped] Fetching details for top ${topReposToFetch.length} repositories`);
+
+  for (const repoData of topReposToFetch) {
+    try {
+      const repoInfo = await fetchGitHub(
+        `https://api.github.com/repos/${repoData.fullName}`,
+        token
+      );
+
       repoContributions.push({
-        name: repo.name,
-        fullName: repo.full_name,
-        commits: commits.length,
-        stars: repo.stargazers_count,
-        language: repo.language,
-        defaultBranch: commits[0]?.branch || 'main',
+        name: repoData.name,
+        fullName: repoData.fullName,
+        commits: repoData.commitCount,
+        stars: repoInfo.stargazers_count || 0,
+        language: repoInfo.language,
+        fixes: repoData.fixes,
+        features: repoData.features,
+        refactors: repoData.refactors,
+        problemRatio: repoData.problemRatio,
+        velocity: repoData.velocity,
+        blitzScore: repoData.blitzScore,
+        activeDays: repoData.activeDaysCount,
       });
-      
-      // Track language usage
-      if (repo.language) {
-        languageStats[repo.language] = (languageStats[repo.language] || 0) + commits.length;
+
+      if (repoInfo.language) {
+        languageStats[repoInfo.language] = (languageStats[repoInfo.language] || 0) + repoData.commitCount;
       }
+    } catch (error) {
+      console.log(`[generateWrapped] Could not fetch details for ${repoData.fullName}: ${error.message}`);
+      repoContributions.push({
+        name: repoData.name,
+        fullName: repoData.fullName,
+        commits: repoData.commitCount,
+        stars: 0,
+        language: null,
+        fixes: repoData.fixes,
+        features: repoData.features,
+        refactors: repoData.refactors,
+        problemRatio: repoData.problemRatio,
+        velocity: repoData.velocity,
+        blitzScore: repoData.blitzScore,
+        activeDays: repoData.activeDaysCount,
+      });
     }
   }
-  
-  console.log(`[generateWrapped] Total commits found: ${totalCommits}`);
-  console.log(`[generateWrapped] Commits by branch - main: ${commitsByBranch.main}, master: ${commitsByBranch.master}, other: ${commitsByBranch.other}`);
-  
-  // Sort repos by commits
+
+  // Add remaining repos without fetching details
+  for (const repoData of allRepoData.slice(50)) {
+    repoContributions.push({
+      name: repoData.name,
+      fullName: repoData.fullName,
+      commits: repoData.commitCount,
+      stars: 0,
+      language: null,
+      fixes: repoData.fixes,
+      features: repoData.features,
+      refactors: repoData.refactors,
+      problemRatio: repoData.problemRatio,
+      velocity: repoData.velocity,
+      blitzScore: repoData.blitzScore,
+      activeDays: repoData.activeDaysCount,
+    });
+  }
+
+  // Sort by commits
   repoContributions.sort((a, b) => b.commits - a.commits);
-  
+
+  // Calculate special repo categories
+  const mostActiveRepo = repoContributions[0] || null;
+
+  const mostProblematicRepo = [...repoContributions]
+    .filter(r => r.fixes > 3) // At least 3 fixes to be considered
+    .sort((a, b) => b.problemRatio - a.problemRatio)[0] || null;
+
+  const blitzRepo = [...repoContributions]
+    .filter(r => r.commits > 10) // At least 10 commits
+    .sort((a, b) => b.blitzScore - a.blitzScore)[0] || null;
+
+  const mostFeatureRepo = [...repoContributions]
+    .sort((a, b) => b.features - a.features)[0] || null;
+
+  const steadiestRepo = [...repoContributions]
+    .filter(r => r.activeDays > 5) // At least 5 active days
+    .sort((a, b) => b.activeDays - a.activeDays)[0] || null;
+
+  console.log(`[generateWrapped] Total commits found: ${totalCommits}`);
+
   // Get top languages
   const topLanguages = Object.entries(languageStats)
     .sort(([, a], [, b]) => b - a)
-    .slice(0, 5)
+    .slice(0, 10) // Top 10 languages
     .map(([language, commits]) => ({ language, commits }));
   
   // Get recent events for additional stats
@@ -605,7 +999,12 @@ async function generateWrapped(username, year, token, env) {
   }
   
   console.log(`[generateWrapped] Wrapped generation complete`);
-  
+
+  // Calculate commit type totals
+  const totalFixes = repoContributions.reduce((sum, r) => sum + (r.fixes || 0), 0);
+  const totalFeatures = repoContributions.reduce((sum, r) => sum + (r.features || 0), 0);
+  const totalRefactors = repoContributions.reduce((sum, r) => sum + (r.refactors || 0), 0);
+
   return {
     user: {
       login: userInfo.login,
@@ -624,11 +1023,77 @@ async function generateWrapped(username, year, token, env) {
       issues,
       reviews,
       repositoriesContributed: repoContributions.length,
-      topRepositories: repoContributions.slice(0, TOP_REPOS_TO_SHOW),
+      topRepositories: repoContributions.slice(0, 10), // Top 10 repos
+      allRepositories: repoContributions, // ALL repos with their stats
       topLanguages,
-      commitsByBranch,
+      // Commit type breakdown
+      commitTypes: {
+        fixes: totalFixes,
+        features: totalFeatures,
+        refactors: totalRefactors,
+        other: totalCommits - totalFixes - totalFeatures - totalRefactors,
+      },
     },
+    // Special repos - the story of the year
+    repoHighlights: {
+      mostActive: mostActiveRepo ? {
+        name: mostActiveRepo.fullName,
+        commits: mostActiveRepo.commits,
+        description: `Your most active repo with ${mostActiveRepo.commits} commits`,
+      } : null,
+      mostProblematic: mostProblematicRepo ? {
+        name: mostProblematicRepo.fullName,
+        fixes: mostProblematicRepo.fixes,
+        problemRatio: Math.round(mostProblematicRepo.problemRatio * 100),
+        description: `${Math.round(mostProblematicRepo.problemRatio * 100)}% of commits were bug fixes`,
+      } : null,
+      blitzRepo: blitzRepo ? {
+        name: blitzRepo.fullName,
+        commits: blitzRepo.commits,
+        activeDays: blitzRepo.activeDays,
+        description: `Intense bursts of activity - ${blitzRepo.commits} commits in just ${blitzRepo.activeDays} days`,
+      } : null,
+      mostFeatures: mostFeatureRepo ? {
+        name: mostFeatureRepo.fullName,
+        features: mostFeatureRepo.features,
+        description: `Your feature factory with ${mostFeatureRepo.features} new features`,
+      } : null,
+      steadiest: steadiestRepo ? {
+        name: steadiestRepo.fullName,
+        activeDays: steadiestRepo.activeDays,
+        description: `Consistent work over ${steadiestRepo.activeDays} days`,
+      } : null,
+    },
+    // Time-based insights
+    timeAnalysis: {
+      peakHour: timeAnalysis.peakHourFormatted,
+      peakDay: timeAnalysis.peakDay,
+      peakMonth: timeAnalysis.peakMonth,
+      codingStyle: timeAnalysis.codingStyle,
+      isWeekendWarrior: timeAnalysis.isWeekendWarrior,
+      weekendCommits: timeAnalysis.weekendCommits,
+      weekdayCommits: timeAnalysis.weekdayCommits,
+      hourlyActivity: timeAnalysis.hourlyActivity,
+      dailyActivity: timeAnalysis.dailyActivity,
+      monthlyActivity: timeAnalysis.monthlyActivity,
+    },
+    // Streak data
+    streaks: {
+      longestStreak: streaks.longestStreak,
+      longestStreakStart: streaks.longestStreakStart,
+      longestStreakEnd: streaks.longestStreakEnd,
+      totalActiveDays: streaks.totalActiveDays,
+      // Include daily commits for heatmap visualization
+      commitsByDate: streaks.commitsByDate,
+    },
+    // AI-generated or rule-based insights
     insights,
+    // All commits for detailed analysis (messages, dates, repos)
+    allCommits: allCommits.map(c => ({
+      message: c.message.split('\n')[0], // First line only
+      date: c.date,
+      repo: c.repo,
+    })),
     generatedAt: new Date().toISOString(),
   };
 }
@@ -964,6 +1429,128 @@ function createIndexRequest(originalRequest) {
 }
 
 /**
+ * Handle workflow start request
+ * Starts an async workflow to fetch all commits
+ */
+async function handleWorkflowStart(request, env, corsHeaders) {
+  const url = new URL(request.url);
+  let username = url.searchParams.get('username');
+  const year = url.searchParams.get('year') || '2025';
+  const tokenFromQuery = url.searchParams.get('token') || null;
+
+  // Get token from session cookie
+  const sessionToken = getSessionToken(request);
+  const token = tokenFromQuery || sessionToken || env.GITHUB_TOKEN || null;
+
+  // If no username provided but user is authenticated, use their username
+  if (!username && sessionToken) {
+    try {
+      const userInfo = await fetchGitHub('https://api.github.com/user', sessionToken);
+      username = userInfo.login;
+    } catch (error) {
+      console.error('[Workflow] Failed to get authenticated user:', error);
+    }
+  }
+
+  if (!username) {
+    return new Response(
+      JSON.stringify({ error: 'Username is required' }),
+      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+  }
+
+  // Check if workflow binding exists
+  if (!env.WRAPPED_WORKFLOW) {
+    return new Response(
+      JSON.stringify({ error: 'Workflow not configured. Please deploy with wrangler.json' }),
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+  }
+
+  try {
+    // Create a unique instance ID
+    const instanceId = `${username}-${year}-${Date.now()}`;
+
+    // Start the workflow
+    const instance = await env.WRAPPED_WORKFLOW.create({
+      id: instanceId,
+      params: { username, year, token },
+    });
+
+    console.log(`[Workflow] Started workflow ${instance.id} for ${username}/${year}`);
+
+    return new Response(
+      JSON.stringify({
+        success: true,
+        instanceId: instance.id,
+        message: `Workflow started for ${username}. Use /api/workflow/status?id=${instance.id} to check progress.`,
+      }),
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+  } catch (error) {
+    console.error('[Workflow] Failed to start:', error);
+    return new Response(
+      JSON.stringify({ error: 'Failed to start workflow', details: error.message }),
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+  }
+}
+
+/**
+ * Handle workflow status check
+ * Returns the status and result of a workflow instance
+ */
+async function handleWorkflowStatus(request, env, corsHeaders) {
+  const url = new URL(request.url);
+  const instanceId = url.searchParams.get('id');
+
+  if (!instanceId) {
+    return new Response(
+      JSON.stringify({ error: 'Instance ID is required' }),
+      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+  }
+
+  if (!env.WRAPPED_WORKFLOW) {
+    return new Response(
+      JSON.stringify({ error: 'Workflow not configured' }),
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+  }
+
+  try {
+    const instance = await env.WRAPPED_WORKFLOW.get(instanceId);
+    const status = await instance.status();
+
+    // If workflow is complete, include the result
+    if (status.status === 'complete') {
+      return new Response(
+        JSON.stringify({
+          status: 'complete',
+          result: status.output,
+        }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // If still running, return status
+    return new Response(
+      JSON.stringify({
+        status: status.status,
+        error: status.error || null,
+      }),
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+  } catch (error) {
+    console.error('[Workflow] Failed to get status:', error);
+    return new Response(
+      JSON.stringify({ error: 'Failed to get workflow status', details: error.message }),
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+  }
+}
+
+/**
  * Handle incoming requests
  */
 async function handleRequest(request, env, ctx) {
@@ -994,7 +1581,16 @@ async function handleRequest(request, env, ctx) {
   if (path === '/api/user') {
     return await handleUserInfo(request, corsHeaders);
   }
-  
+
+  // Workflow routes - for async, long-running commit fetching
+  if (path === '/api/workflow/start') {
+    return await handleWorkflowStart(request, env, corsHeaders);
+  }
+
+  if (path === '/api/workflow/status') {
+    return await handleWorkflowStatus(request, env, corsHeaders);
+  }
+
   // API routes
   if (path === '/api/wrapped') {
     // Get query parameters
