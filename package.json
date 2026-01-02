@@ -16,6 +16,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "isomorphic-git": "^1.27.1",
     "vue": "^3.5.26"
   },
   "devDependencies": {
