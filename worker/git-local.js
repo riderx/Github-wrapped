@@ -5,7 +5,7 @@
  */
 
 import * as git from 'isomorphic-git';
-import http from 'isomorphic-git/http/web/index.js';
+import http from 'isomorphic-git/http/web';
 import * as fs from 'node:fs';
 
 /**
